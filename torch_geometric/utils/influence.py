@@ -1,12 +1,14 @@
-from typing import List, Tuple, Union, cast
+from typing import TYPE_CHECKING, List, Tuple, Union, cast
 
 import torch
 from torch import Tensor
 from torch.autograd.functional import jacobian
 from tqdm.auto import tqdm
 
-from torch_geometric.data import Data
 from torch_geometric.utils import k_hop_subgraph
+
+if TYPE_CHECKING:
+    from torch_geometric.data import Data
 
 
 def k_hop_subsets_rough(
@@ -89,7 +91,7 @@ def k_hop_subsets_exact(
 
 def jacobian_l1(
     model: torch.nn.Module,
-    data: Data,
+    data: 'Data',
     max_hops: int,
     node_idx: int,
     device: Union[torch.device, str],
@@ -141,7 +143,7 @@ def jacobian_l1(
 
 def jacobian_l1_agg_per_hop(
     model: torch.nn.Module,
-    data: Data,
+    data: 'Data',
     max_hops: int,
     node_idx: int,
     device: Union[torch.device, str],
@@ -192,7 +194,7 @@ def influence_weighted_receptive_field(T: Tensor) -> float:
 
 def total_influence(
     model: torch.nn.Module,
-    data: Data,
+    data: 'Data',
     max_hops: int,
     num_samples: Union[int, None] = None,
     normalize: bool = True,
