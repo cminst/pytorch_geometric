@@ -64,6 +64,7 @@ for dataset_name, Net in product(datasets, nets):
     if Net is LaCore:
         print("Overriding hyperparams with LaCore optimal settings")
         params = LaCore.default_hparams(dataset_name)
+        print(params)
         layer_grid = [2]  # Script uses one conv pre-pool and one post-pool.
         hidden_grid = [params['hidden']]
         lr = params['lr']
