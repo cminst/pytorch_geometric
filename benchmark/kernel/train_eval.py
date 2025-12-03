@@ -43,6 +43,9 @@ def cross_validation_with_val_set(dataset, model, folds, epochs, batch_size,
         fold_splits = list(zip(*k_fold(dataset, folds, seed=kfold_seed)))
 
     for fold, split in enumerate(fold_splits):
+        best_val_metric = -float('inf') if selection_metric == 'acc' else float('inf')
+        best_test_at_val = 0.0
+        best_epoch = 0
         if use_inner_val:
             train_idx_np, test_idx_np = split
             train_idx = torch.as_tensor(train_idx_np, dtype=torch.long)
@@ -101,6 +104,12 @@ def cross_validation_with_val_set(dataset, model, folds, epochs, batch_size,
             val_losses.append(eval_loss(model, val_loader))
             val_accs.append(eval_acc(model, val_loader))
             accs.append(eval_acc(model, test_loader))
+            val_metric = val_accs[-1] if selection_metric == 'acc' else val_losses[-1]
+            if (selection_metric == 'acc' and val_metric > best_val_metric) or (
+                    selection_metric != 'acc' and val_metric < best_val_metric):
+                best_val_metric = val_metric
+                best_test_at_val = accs[-1]
+                best_epoch = epoch
             eval_info = {
                 'fold': fold,
                 'epoch': epoch,
@@ -109,9 +118,11 @@ def cross_validation_with_val_set(dataset, model, folds, epochs, batch_size,
                 'val_loss': val_losses[-1],
                 'val_acc': val_accs[-1],
                 'test_acc': accs[-1],
+                'test_acc_at_best_val': best_test_at_val,
+                'best_epoch': best_epoch,
             }
 
-            if logger is not None:
+            if logger is not None and (epoch == 1 or epoch % 20 == 0 or epoch == epochs):
                 logger(eval_info)
 
             if epoch % lr_decay_step_size == 0:

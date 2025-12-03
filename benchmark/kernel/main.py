@@ -52,12 +52,18 @@ nets = [
 
 def logger(info):
     fold, epoch = info['fold'] + 1, info['epoch']
-    train_acc, val_acc, val_loss, test_acc = info['train_acc'], info['val_acc'], info['val_loss'], info['test_acc']
+    train_acc = info['train_acc']
+    val_acc = info['val_acc']
+    val_loss = info['val_loss']
+    test_acc = info['test_acc']
+    best_test = info.get('test_acc_at_best_val', test_acc)
+    best_epoch = info.get('best_epoch', epoch)
     print(f'{fold:02d}/{epoch:03d}: '
           f'Train Acc: {train_acc:.3f}, '
           f'Val Acc: {val_acc:.3f}, '
           f'Val Loss: {val_loss:.4f}, '
-          f'Test Acc: {test_acc:.3f}')
+          f'Test Acc: {test_acc:.3f}, '
+          f'Test@Best Val: {best_test:.3f} (epoch {best_epoch})')
 
 
 results = []
