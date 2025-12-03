@@ -24,6 +24,11 @@ def cross_validation_with_val_set(dataset, model, folds, epochs, batch_size,
                                   kfold_seed=12345,
                                   use_inner_val=False):
 
+    def _label_hist(indices):
+        lbl = dataset.y[indices].view(-1).long()
+        num_classes = int(dataset.y.max()) + 1
+        return torch.bincount(lbl, minlength=num_classes).tolist()
+
     val_losses, val_accs, accs, durations = [], [], [], []
     if use_inner_val:
         # Match the splitting scheme in lacorepool_graph_classification.py:
@@ -49,6 +54,15 @@ def cross_validation_with_val_set(dataset, model, folds, epochs, batch_size,
             inner_train_sub, inner_val_sub = next(skf.split(torch.arange(len(train_idx)), labels))
             train_ids = train_idx[inner_train_sub]
             val_ids = train_idx[inner_val_sub]
+
+            # Helpful debug signal to ensure we match the reference script.
+            print(
+                f"[LaCore split] fold {fold + 1}/{folds}: "
+                f"train={len(train_ids)} val={len(val_ids)} test={len(test_idx)} | "
+                f"train_hist={_label_hist(train_ids)} "
+                f"val_hist={_label_hist(val_ids)} "
+                f"test_hist={_label_hist(test_idx)}"
+            )
         else:
             train_idx, test_idx, val_idx = split
             train_ids = train_idx
