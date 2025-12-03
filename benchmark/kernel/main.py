@@ -105,6 +105,9 @@ for dataset_name, Net in product(datasets, nets):
             lr_decay_step_size=lr_decay_step_size,
             weight_decay=weight_decay,
             logger=None,
+            selection_metric='acc' if Net is LaCore else 'loss',
+            kfold_seed=42 if Net is LaCore else 12345,
+            use_inner_val=(Net is LaCore),
         )
         if loss < best_result[0]:
             best_result = (loss, acc, std)

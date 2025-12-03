@@ -19,15 +19,31 @@ else:
 
 def cross_validation_with_val_set(dataset, model, folds, epochs, batch_size,
                                   lr, lr_decay_factor, lr_decay_step_size,
-                                  weight_decay, logger=None):
+                                  weight_decay, logger=None,
+                                  selection_metric='loss',
+                                  kfold_seed=12345,
+                                  use_inner_val=False):
 
-    val_losses, accs, durations = [], [], []
+    val_losses, val_accs, accs, durations = [], [], [], []
     for fold, (train_idx, test_idx,
-               val_idx) in enumerate(zip(*k_fold(dataset, folds))):
+               val_idx) in enumerate(zip(*k_fold(dataset, folds, seed=kfold_seed))):
 
-        train_dataset = dataset[train_idx]
+        if use_inner_val:
+            # Split the current training fold into train/val following the
+            # nested StratifiedKFold logic used in lacorepool_graph_classification.py.
+            from sklearn.model_selection import StratifiedKFold
+            labels = dataset.y[train_idx]
+            skf = StratifiedKFold(n_splits=10, shuffle=True, random_state=kfold_seed)
+            inner_train_sub, inner_val_sub = next(skf.split(torch.arange(len(train_idx)), labels))
+            train_ids = train_idx[inner_train_sub]
+            val_ids = train_idx[inner_val_sub]
+        else:
+            train_ids = train_idx
+            val_ids = val_idx
+
+        train_dataset = dataset[train_ids]
         test_dataset = dataset[test_idx]
-        val_dataset = dataset[val_idx]
+        val_dataset = dataset[val_ids]
 
         if 'adj' in train_dataset[0]:
             train_loader = DenseLoader(train_dataset, batch_size, shuffle=True)
@@ -55,12 +71,14 @@ def cross_validation_with_val_set(dataset, model, folds, epochs, batch_size,
         for epoch in range(1, epochs + 1):
             train_loss = train(model, optimizer, train_loader)
             val_losses.append(eval_loss(model, val_loader))
+            val_accs.append(eval_acc(model, val_loader))
             accs.append(eval_acc(model, test_loader))
             eval_info = {
                 'fold': fold,
                 'epoch': epoch,
                 'train_loss': train_loss,
                 'val_loss': val_losses[-1],
+                'val_acc': val_accs[-1],
                 'test_acc': accs[-1],
             }
 
@@ -80,23 +98,26 @@ def cross_validation_with_val_set(dataset, model, folds, epochs, batch_size,
         t_end = time.perf_counter()
         durations.append(t_end - t_start)
 
-    loss, acc, duration = tensor(val_losses), tensor(accs), tensor(durations)
-    loss, acc = loss.view(folds, epochs), acc.view(folds, epochs)
-    loss, argmin = loss.min(dim=1)
-    acc = acc[torch.arange(folds, dtype=torch.long), argmin]
+    loss, v_acc, acc, duration = tensor(val_losses), tensor(val_accs), tensor(accs), tensor(durations)
+    loss, v_acc, acc = loss.view(folds, epochs), v_acc.view(folds, epochs), acc.view(folds, epochs)
+    if selection_metric == 'acc':
+        best_val, argbest = v_acc.max(dim=1)
+    else:
+        best_val, argbest = loss.min(dim=1)
+    acc = acc[torch.arange(folds, dtype=torch.long), argbest]
 
     loss_mean = loss.mean().item()
     acc_mean = acc.mean().item()
     acc_std = acc.std().item()
     duration_mean = duration.mean().item()
-    print(f'Val Loss: {loss_mean:.4f}, Test Accuracy: {acc_mean:.3f} '
+    print(f'Val Metric: {best_val.mean().item():.4f}, Test Accuracy: {acc_mean:.3f} '
           f'± {acc_std:.3f}, Duration: {duration_mean:.3f}')
 
     return loss_mean, acc_mean, acc_std
 
 
-def k_fold(dataset, folds):
-    skf = StratifiedKFold(folds, shuffle=True, random_state=12345)
+def k_fold(dataset, folds, seed=12345):
+    skf = StratifiedKFold(folds, shuffle=True, random_state=seed)
 
     test_indices, train_indices = [], []
     for _, idx in skf.split(torch.zeros(len(dataset)), dataset.y):

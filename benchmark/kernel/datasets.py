@@ -63,9 +63,10 @@ def get_dataset(name, sparse=True, cleaned=False, extra_transform=None):
                 [dataset.transform, T.ToDense(num_nodes)])
 
     if extra_transform is not None:
-        if dataset.transform is None:
-            dataset.transform = extra_transform
-        else:
-            dataset.transform = T.Compose([dataset.transform, extra_transform])
+        # Avoid recomputing costly transforms (e.g., LaCore assignment) on every
+        # __getitem__ by materializing them once.
+        full_transform = extra_transform if dataset.transform is None else T.Compose([dataset.transform, extra_transform])
+        dataset = dataset.map(full_transform)
+        dataset.transform = None
 
     return dataset
