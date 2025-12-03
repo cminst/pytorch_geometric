@@ -22,9 +22,9 @@ class NormalizedDegree:
 def get_dataset(name, sparse=True, cleaned=False, extra_transform=None):
     path = osp.join(osp.dirname(osp.realpath(__file__)), '..', 'data', name)
     dataset = TUDataset(path, name, cleaned=cleaned)
-    dataset.data.edge_attr = None
+    dataset._data.edge_attr = None
 
-    if dataset.data.x is None:
+    if dataset._data.x is None:
         max_degree = 0
         degs = []
         for data in dataset:
