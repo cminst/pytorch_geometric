@@ -499,7 +499,7 @@ def run_lacore_pool_experiment(
     kfold_splits: int = 10,
     num_proc: int = 1,
     seed: int = 42,
-    epsilon: float = 1e3,
+    epsilon: float = 1e3, # 1e3 is just an arbitrary default; for PROTEINS 0.1 is the optimal epsilon for 76/77% accuracy.
     target_ratio: float = 0.5,
     min_size: int = 4,
     max_clusters: Optional[int] = None,
