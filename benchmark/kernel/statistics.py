@@ -1,4 +1,4 @@
-from kernel.datasets import get_dataset
+from datasets import get_dataset
 
 
 def print_dataset(dataset):
