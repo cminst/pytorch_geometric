@@ -97,6 +97,7 @@ def cross_validation_with_val_set(dataset, model, folds, epochs, batch_size,
 
         for epoch in range(1, epochs + 1):
             train_loss = train(model, optimizer, train_loader)
+            train_acc = eval_acc(model, train_loader)
             val_losses.append(eval_loss(model, val_loader))
             val_accs.append(eval_acc(model, val_loader))
             accs.append(eval_acc(model, test_loader))
@@ -104,6 +105,7 @@ def cross_validation_with_val_set(dataset, model, folds, epochs, batch_size,
                 'fold': fold,
                 'epoch': epoch,
                 'train_loss': train_loss,
+                'train_acc': train_acc,
                 'val_loss': val_losses[-1],
                 'val_acc': val_accs[-1],
                 'test_acc': accs[-1],

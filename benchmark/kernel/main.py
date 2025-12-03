@@ -52,9 +52,12 @@ nets = [
 
 def logger(info):
     fold, epoch = info['fold'] + 1, info['epoch']
-    val_loss, test_acc = info['val_loss'], info['test_acc']
-    print(f'{fold:02d}/{epoch:03d}: Val Loss: {val_loss:.4f}, '
-          f'Test Accuracy: {test_acc:.3f}')
+    train_acc, val_acc, val_loss, test_acc = info['train_acc'], info['val_acc'], info['val_loss'], info['test_acc']
+    print(f'{fold:02d}/{epoch:03d}: '
+          f'Train Acc: {train_acc:.3f}, '
+          f'Val Acc: {val_acc:.3f}, '
+          f'Val Loss: {val_loss:.4f}, '
+          f'Test Acc: {test_acc:.3f}')
 
 
 results = []
@@ -112,7 +115,7 @@ for dataset_name, Net in product(datasets, nets):
             lr_decay_factor=lr_decay_factor,
             lr_decay_step_size=lr_decay_step_size,
             weight_decay=weight_decay,
-            logger=None,
+            logger=logger,
             selection_metric='acc' if Net is LaCore else 'loss',
             kfold_seed=42 if Net is LaCore else 12345,
             use_inner_val=(Net is LaCore),
