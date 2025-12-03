@@ -3,7 +3,7 @@ import os.path as osp
 import torch
 
 import torch_geometric.transforms as T
-from torch_geometric.datasets import TUDataset
+from torch_geometric.datasets import TUDataset, ModelNet
 from torch_geometric.utils import degree
 from torch_geometric.data import InMemoryDataset
 
@@ -20,7 +20,60 @@ class NormalizedDegree:
         return data
 
 
-def get_dataset(name, sparse=True, cleaned=False, extra_transform=None):
+def _select_config(dataset_config, name):
+    if not isinstance(dataset_config, dict):
+        return {}
+    if name in dataset_config and isinstance(dataset_config[name], dict):
+        return dataset_config[name]
+    return dataset_config
+
+
+def get_dataset(
+    name,
+    sparse=True,
+    cleaned=False,
+    extra_transform=None,
+    dataset_config=None,
+):
+    # ModelNet10/40 support: build point-cloud graphs the same way as
+    # lacore_3d_pooling.py (SamplePoints -> NormalizeScale -> KNNGraph,
+    # with x=pos).
+    if name in {'ModelNet40', 'ModelNet10'}:
+        num = '40' if name.endswith('40') else '10'
+        cfg = _select_config(dataset_config, name)
+
+        class PosToX:
+            def __call__(self, data):
+                data.x = data.pos
+                return data
+
+        base_transform = T.Compose([
+            T.SamplePoints(cfg.get('num_points', 1024)),
+            T.NormalizeScale(),
+            T.KNNGraph(k=cfg.get('knn_k', 16), force_undirected=True),
+            PosToX(),
+        ])
+        full_transform = base_transform if extra_transform is None else T.Compose([base_transform, extra_transform])
+
+        root = cfg.get(
+            'root',
+            osp.join(osp.dirname(osp.realpath(__file__)), '..', 'data', 'ModelNet'),
+        )
+        train_ds = ModelNet(root=root, name=num, train=True, transform=full_transform)
+        test_ds = ModelNet(root=root, name=num, train=False, transform=full_transform)
+
+        data_list = [train_ds[i] for i in range(len(train_ds))]
+        data_list += [test_ds[i] for i in range(len(test_ds))]
+
+        class _ModelNetMerged(InMemoryDataset):
+            def __init__(self, dl):
+                super().__init__(root=None)
+                self.data, self.slices = self.collate(dl)
+
+        dataset = _ModelNetMerged(data_list)
+        dataset.transform = None
+        return dataset
+
     path = osp.join(osp.dirname(osp.realpath(__file__)), '..', 'data', name)
     dataset = TUDataset(path, name, cleaned=cleaned)
     dataset._data.edge_attr = None

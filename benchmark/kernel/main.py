@@ -24,11 +24,34 @@ parser.add_argument('--lr', type=float, default=0.01)
 parser.add_argument('--lr_decay_factor', type=float, default=0.5)
 parser.add_argument('--lr_decay_step_size', type=int, default=50)
 parser.add_argument('--verbose', '-v', action='store_true', default=False, help='Logs training stats')
+parser.add_argument('--datasets', type=str, default=None,
+                    help="Comma-separated dataset names (e.g., 'PROTEINS,ModelNet40').")
+parser.add_argument('--modelnet_num_points', type=int, default=1024,
+                    help='Number of points to sample per mesh for ModelNet datasets.')
+parser.add_argument('--modelnet_knn_k', type=int, default=16,
+                    help='k for KNN graph construction on ModelNet datasets.')
 args = parser.parse_args()
 
 layers = [1, 2, 3, 4, 5]
 hiddens = [16, 32, 64, 128]
-datasets = ['PROTEINS'] #['MUTAG', 'PROTEINS', 'IMDB-BINARY', 'REDDIT-BINARY']  # , 'COLLAB']
+
+# NOTE: datasets are stored in ../data/DATASET_NAME/DATASET_NAME/[processed|raw]
+default_datasets = ['PROTEINS'] # ['MUTAG', 'PROTEINS', 'IMDB-BINARY', 'REDDIT-BINARY', 'COLLAB']
+if args.datasets:
+    datasets = [d.strip() for d in args.datasets.split(',') if d.strip()]
+else:
+    datasets = default_datasets
+
+# Optional per-dataset configuration (currently used for ModelNet).
+dataset_config = {}
+if any(name.startswith('ModelNet') for name in datasets):
+    modelnet_cfg = {
+        'num_points': args.modelnet_num_points,
+        'knn_k': args.modelnet_knn_k,
+    }
+    dataset_config['ModelNet40'] = modelnet_cfg
+    dataset_config['ModelNet10'] = modelnet_cfg
+
 nets = [
     # GCNWithJK,
     # GraphSAGEWithJK,
@@ -109,6 +132,7 @@ for dataset_name, Net in product(datasets, nets):
             dataset_name,
             sparse=Net != DiffPool,
             extra_transform=extra_transform,
+            dataset_config=dataset_config,
         )
         model_kwargs = {}
         if Net is LaCore:

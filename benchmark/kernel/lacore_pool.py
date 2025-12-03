@@ -50,6 +50,8 @@ class LaCore(torch.nn.Module):
                    'batch_size': 64, 'epochs': 500},
             'PROTEINS': {'hidden': 128, 'lr': 5e-4, 'dropout': 0.1,
                          'batch_size': 128, 'epochs': 500},
+            'ModelNet40': {'batch_size': 32, 'epsilon': 1e3, 'target_ratio': 0.5},
+            'ModelNet10': {'batch_size': 32, 'epsilon': 1e3, 'target_ratio': 0.5},
             'NCI1': {'hidden': 256, 'lr': 5e-4, 'dropout': 0.4,
                      'batch_size': 256, 'epochs': 500},
             'NCI109': {'hidden': 128, 'lr': 5e-4, 'dropout': 0.2,
