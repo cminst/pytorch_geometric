@@ -1,6 +1,6 @@
 import torch
 import torch.nn.functional as F
-from torch.nn import Linear
+from torch.nn import Linear, Sequential, ReLU, Dropout
 
 from graph_classif_utils import compute_lacore_cover_for_graph
 from torch_geometric.nn import GCNConv, global_mean_pool, global_max_pool, LaCorePooling
@@ -71,9 +71,13 @@ class LaCore(torch.nn.Module):
             self.post_pool_convs.append(GCNConv(hidden, hidden))
 
         self.pool = LaCorePooling(aggregate='mean')
-        # We concatenate pre/post pooled global mean and max: 4 * hidden.
-        self.lin1 = Linear(4 * hidden, hidden)
-        self.lin2 = Linear(hidden, dataset.num_classes)
+
+        self.lin = Sequential(
+            Linear(4*hidden, 2*hidden),
+            ReLU(),
+            Dropout(dropout),
+            Linear(2*hidden, dataset.num_classes),
+        )
         self.dropout = dropout
 
     def reset_parameters(self):
@@ -81,8 +85,8 @@ class LaCore(torch.nn.Module):
         for conv in self.post_pool_convs:
             conv.reset_parameters()
         self.pool.reset_parameters()
-        self.lin1.reset_parameters()
-        self.lin2.reset_parameters()
+        for layer in self.lin:
+            layer.reset_parameters()
 
     def forward(self, data):
         if not hasattr(data, 'cluster') or not hasattr(data, 'num_clusters'):
@@ -106,11 +110,9 @@ class LaCore(torch.nn.Module):
         post_mean = global_mean_pool(x, batch_pooled)
         post_max = global_max_pool(x, batch_pooled)
 
-        x = torch.cat([pre_mean, pre_max, post_mean, post_max], dim=-1)
-        x = F.relu(self.lin1(x))
-        x = F.dropout(x, p=self.dropout, training=self.training)
-        x = self.lin2(x)
-        return F.log_softmax(x, dim=-1)
+        g = torch.cat([pre_mean, pre_max, post_mean, post_max], dim=-1)
+        out = self.lin(g)
+        return out
 
     def __repr__(self):
         return self.__class__.__name__
