@@ -39,6 +39,10 @@ class LaCore(torch.nn.Module):
             'batch_size': 64,
             'epochs': 500,
             'weight_decay': 1e-3,
+            'epsilon': 0.1,
+            'target_ratio': 0.25,
+            'min_size': 4,
+            'max_clusters': None,
         }
 
         table = {
@@ -104,7 +108,7 @@ class LaCore(torch.nn.Module):
 
         x = torch.cat([pre_mean, pre_max, post_mean, post_max], dim=-1)
         x = F.relu(self.lin1(x))
-        x = F.dropout(x, p=0.5, training=self.training)
+        x = F.dropout(x, p=self.dropout, training=self.training)
         x = self.lin2(x)
         return F.log_softmax(x, dim=-1)
 

@@ -14,7 +14,7 @@ from sag_pool import SAGPool
 from set2set import Set2SetNet
 from sort_pool import SortPool
 from top_k import TopK
-from lacore_pool import LaCore
+from lacore_pool import LaCore, LaCoreAssignment
 from train_eval import cross_validation_with_val_set
 
 parser = argparse.ArgumentParser()
@@ -73,6 +73,12 @@ for dataset_name, Net in product(datasets, nets):
         lr_decay_factor = 1.0  # Script trains with a fixed LR.
         lr_decay_step_size = epochs + 1  # Disable decay.
         dropout = params['dropout']
+        extra_transform = LaCoreAssignment(
+            epsilon=params.get('epsilon', 0.1),
+            target_ratio=params.get('target_ratio', 0.25),
+            min_size=params.get('min_size', 4),
+            max_clusters=params.get('max_clusters', None),
+        )
     else:
         layer_grid = layers
         hidden_grid = hiddens
@@ -83,12 +89,13 @@ for dataset_name, Net in product(datasets, nets):
         lr_decay_factor = args.lr_decay_factor
         lr_decay_step_size = args.lr_decay_step_size
         dropout = None
+        extra_transform = getattr(Net, 'extra_transform', None)
 
     for num_layers, hidden in product(layer_grid, hidden_grid):
         dataset = get_dataset(
             dataset_name,
             sparse=Net != DiffPool,
-            extra_transform=getattr(Net, 'extra_transform', None),
+            extra_transform=extra_transform,
         )
         model_kwargs = {}
         if Net is LaCore:
