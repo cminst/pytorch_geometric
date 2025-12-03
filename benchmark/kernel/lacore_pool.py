@@ -86,7 +86,8 @@ class LaCore(torch.nn.Module):
             conv.reset_parameters()
         self.pool.reset_parameters()
         for layer in self.lin:
-            layer.reset_parameters()
+            if hasattr(layer, 'reset_parameters'):
+                layer.reset_parameters()
 
     def forward(self, data):
         if not hasattr(data, 'cluster') or not hasattr(data, 'num_clusters'):
