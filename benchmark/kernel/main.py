@@ -14,6 +14,7 @@ from sag_pool import SAGPool
 from set2set import Set2SetNet
 from sort_pool import SortPool
 from top_k import TopK
+from lacore_pool import LaCore
 from train_eval import cross_validation_with_val_set
 
 parser = argparse.ArgumentParser()
@@ -45,6 +46,7 @@ nets = [
     Set2SetNet,
     SortPool,
     ASAP,
+    LaCore,
 ]
 
 
@@ -60,7 +62,11 @@ for dataset_name, Net in product(datasets, nets):
     best_result = (float('inf'), 0, 0)  # (loss, acc, std)
     print(f'--\n{dataset_name} - {Net.__name__}')
     for num_layers, hidden in product(layers, hiddens):
-        dataset = get_dataset(dataset_name, sparse=Net != DiffPool)
+        dataset = get_dataset(
+            dataset_name,
+            sparse=Net != DiffPool,
+            extra_transform=getattr(Net, 'extra_transform', None),
+        )
         model = Net(dataset, num_layers, hidden)
         loss, acc, std = cross_validation_with_val_set(
             dataset,

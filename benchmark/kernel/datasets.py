@@ -19,7 +19,7 @@ class NormalizedDegree:
         return data
 
 
-def get_dataset(name, sparse=True, cleaned=False):
+def get_dataset(name, sparse=True, cleaned=False, extra_transform=None):
     path = osp.join(osp.dirname(osp.realpath(__file__)), '..', 'data', name)
     dataset = TUDataset(path, name, cleaned=cleaned)
     dataset.data.edge_attr = None
@@ -61,5 +61,11 @@ def get_dataset(name, sparse=True, cleaned=False):
         else:
             dataset.transform = T.Compose(
                 [dataset.transform, T.ToDense(num_nodes)])
+
+    if extra_transform is not None:
+        if dataset.transform is None:
+            dataset.transform = extra_transform
+        else:
+            dataset.transform = T.Compose([dataset.transform, extra_transform])
 
     return dataset

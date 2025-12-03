@@ -16,6 +16,7 @@ from .max_pool import max_pool, max_pool_neighbor_x, max_pool_x
 from .topk_pool import TopKPooling
 from .sag_pool import SAGPooling
 from .edge_pool import EdgePooling
+from .lacore_pool import LaCorePooling
 from .cluster_pool import ClusterPooling
 from .asap import ASAPooling
 from .pan_pool import PANPooling
