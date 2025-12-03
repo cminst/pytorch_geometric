@@ -25,19 +25,32 @@ def cross_validation_with_val_set(dataset, model, folds, epochs, batch_size,
                                   use_inner_val=False):
 
     val_losses, val_accs, accs, durations = [], [], [], []
-    for fold, (train_idx, test_idx,
-               val_idx) in enumerate(zip(*k_fold(dataset, folds, seed=kfold_seed))):
+    if use_inner_val:
+        # Match the splitting scheme in lacorepool_graph_classification.py:
+        # outer 10-fold CV (train/test), with an inner stratified split on
+        # the training portion to build the validation set. We do not carve
+        # out the "previous fold" as an additional validation set (unlike
+        # the original kernel benchmark), so the effective train/val/test
+        # proportions mirror the reference script.
+        outer_skf = StratifiedKFold(folds, shuffle=True, random_state=kfold_seed)
+        fold_splits = list(outer_skf.split(torch.zeros(len(dataset)), dataset.y))
+    else:
+        fold_splits = list(zip(*k_fold(dataset, folds, seed=kfold_seed)))
 
+    for fold, split in enumerate(fold_splits):
         if use_inner_val:
-            # Split the current training fold into train/val following the
-            # nested StratifiedKFold logic used in lacorepool_graph_classification.py.
-            from sklearn.model_selection import StratifiedKFold
+            train_idx_np, test_idx_np = split
+            train_idx = torch.as_tensor(train_idx_np, dtype=torch.long)
+            test_idx = torch.as_tensor(test_idx_np, dtype=torch.long)
+
+            # Inner stratified split on the training subset.
             labels = dataset.y[train_idx]
             skf = StratifiedKFold(n_splits=10, shuffle=True, random_state=kfold_seed)
             inner_train_sub, inner_val_sub = next(skf.split(torch.arange(len(train_idx)), labels))
             train_ids = train_idx[inner_train_sub]
             val_ids = train_idx[inner_val_sub]
         else:
+            train_idx, test_idx, val_idx = split
             train_ids = train_idx
             val_ids = val_idx
 
