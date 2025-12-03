@@ -61,23 +61,49 @@ results = []
 for dataset_name, Net in product(datasets, nets):
     best_result = (float('inf'), 0, 0)  # (loss, acc, std)
     print(f'--\n{dataset_name} - {Net.__name__}')
-    for num_layers, hidden in product(layers, hiddens):
+    if Net is LaCore:
+        print("Overriding hyperparams with LaCore optimal settings")
+        params = LaCore.default_hparams(dataset_name)
+        layer_grid = [2]  # Script uses one conv pre-pool and one post-pool.
+        hidden_grid = [params['hidden']]
+        lr = params['lr']
+        weight_decay = params['weight_decay']
+        epochs = params['epochs']
+        batch_size = params['batch_size']
+        lr_decay_factor = 1.0  # Script trains with a fixed LR.
+        lr_decay_step_size = epochs + 1  # Disable decay.
+        dropout = params['dropout']
+    else:
+        layer_grid = layers
+        hidden_grid = hiddens
+        lr = args.lr
+        weight_decay = 0
+        epochs = args.epochs
+        batch_size = args.batch_size
+        lr_decay_factor = args.lr_decay_factor
+        lr_decay_step_size = args.lr_decay_step_size
+        dropout = None
+
+    for num_layers, hidden in product(layer_grid, hidden_grid):
         dataset = get_dataset(
             dataset_name,
             sparse=Net != DiffPool,
             extra_transform=getattr(Net, 'extra_transform', None),
         )
-        model = Net(dataset, num_layers, hidden)
+        model_kwargs = {}
+        if Net is LaCore:
+            model_kwargs['dropout'] = dropout
+        model = Net(dataset, num_layers, hidden, **model_kwargs)
         loss, acc, std = cross_validation_with_val_set(
             dataset,
             model,
             folds=10,
-            epochs=args.epochs,
-            batch_size=args.batch_size,
-            lr=args.lr,
-            lr_decay_factor=args.lr_decay_factor,
-            lr_decay_step_size=args.lr_decay_step_size,
-            weight_decay=0,
+            epochs=epochs,
+            batch_size=batch_size,
+            lr=lr,
+            lr_decay_factor=lr_decay_factor,
+            lr_decay_step_size=lr_decay_step_size,
+            weight_decay=weight_decay,
             logger=None,
         )
         if loss < best_result[0]:

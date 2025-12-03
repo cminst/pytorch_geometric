@@ -3,11 +3,11 @@ import torch.nn.functional as F
 from torch.nn import Linear
 
 from graph_classif_utils import compute_lacore_cover_for_graph
-from torch_geometric.nn import GraphConv, global_mean_pool, global_max_pool, LaCorePooling
+from torch_geometric.nn import GCNConv, global_mean_pool, global_max_pool, LaCorePooling
 
 
 class LaCoreAssignment:
-    def __init__(self, epsilon=1e3, target_ratio=0.5, min_size=4, max_clusters=None):
+    def __init__(self, epsilon=0.1, target_ratio=0.5, min_size=4, max_clusters=None):
         self.epsilon = epsilon
         self.target_ratio = target_ratio
         self.min_size = min_size
@@ -30,19 +30,47 @@ class LaCore(torch.nn.Module):
     # Expose an extra transform so the dataset loader can append it.
     extra_transform = LaCoreAssignment()
 
-    def __init__(self, dataset, num_layers, hidden):
+    @staticmethod
+    def default_hparams(dataset_name: str):
+        base = {
+            'hidden': 64,
+            'lr': 1e-4,
+            'dropout': 0.2,
+            'batch_size': 64,
+            'epochs': 500,
+            'weight_decay': 1e-3,
+        }
+
+        table = {
+            'DD': {'hidden': 128, 'lr': 1e-4, 'dropout': 0.15,
+                   'batch_size': 64, 'epochs': 500},
+            'PROTEINS': {'hidden': 128, 'lr': 5e-4, 'dropout': 0.1,
+                         'batch_size': 128, 'epochs': 500},
+            'NCI1': {'hidden': 256, 'lr': 5e-4, 'dropout': 0.4,
+                     'batch_size': 256, 'epochs': 500},
+            'NCI109': {'hidden': 128, 'lr': 5e-4, 'dropout': 0.2,
+                       'batch_size': 64, 'epochs': 500},
+            'FRANKENSTEIN': {'hidden': 128, 'lr': 1e-3, 'dropout': 0.2,
+                             'batch_size': 128, 'epochs': 500},
+        }
+        overrides = table.get(dataset_name, {})
+        merged = {**base, **overrides}
+        return merged
+
+    def __init__(self, dataset, num_layers, hidden, dropout=0.2):
         super().__init__()
-        self.conv1 = GraphConv(dataset.num_features, hidden, aggr='mean')
+        self.conv1 = GCNConv(dataset.num_features, hidden)
 
         # Remaining layers operate after pooling.
         self.post_pool_convs = torch.nn.ModuleList()
         for _ in range(max(num_layers - 1, 0)):
-            self.post_pool_convs.append(GraphConv(hidden, hidden, aggr='mean'))
+            self.post_pool_convs.append(GCNConv(hidden, hidden))
 
         self.pool = LaCorePooling(aggregate='mean')
         # We concatenate pre/post pooled global mean and max: 4 * hidden.
         self.lin1 = Linear(4 * hidden, hidden)
         self.lin2 = Linear(hidden, dataset.num_classes)
+        self.dropout = dropout
 
     def reset_parameters(self):
         self.conv1.reset_parameters()
@@ -59,7 +87,7 @@ class LaCore(torch.nn.Module):
 
         x, edge_index, batch = data.x, data.edge_index, data.batch
         x = F.relu(self.conv1(x, edge_index))
-        x = F.dropout(x, p=0.5, training=self.training)
+        x = F.dropout(x, p=self.dropout, training=self.training)
 
         pre_mean = global_mean_pool(x, batch)
         pre_max = global_max_pool(x, batch)
@@ -69,7 +97,7 @@ class LaCore(torch.nn.Module):
 
         for conv in self.post_pool_convs:
             x = F.relu(conv(x, edge_index))
-            x = F.dropout(x, p=0.5, training=self.training)
+            x = F.dropout(x, p=self.dropout, training=self.training)
 
         post_mean = global_mean_pool(x, batch_pooled)
         post_max = global_max_pool(x, batch_pooled)
