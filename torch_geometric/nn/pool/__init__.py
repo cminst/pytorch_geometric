@@ -350,6 +350,7 @@ __all__ = [
     'TopKPooling',
     'SAGPooling',
     'EdgePooling',
+    'LaCorePooling',
     'ClusterPooling',
     'ASAPooling',
     'PANPooling',
