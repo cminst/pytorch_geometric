@@ -5,6 +5,7 @@ import torch
 import torch_geometric.transforms as T
 from torch_geometric.datasets import TUDataset
 from torch_geometric.utils import degree
+from torch_geometric.data import InMemoryDataset
 
 
 class NormalizedDegree:
@@ -64,9 +65,20 @@ def get_dataset(name, sparse=True, cleaned=False, extra_transform=None):
 
     if extra_transform is not None:
         # Avoid recomputing costly transforms (e.g., LaCore assignment) on every
-        # __getitem__ by materializing them once.
+        # __getitem__ by materializing them once. TUDataset may not expose
+        # `.map` on older PyG versions, so fall back to manual materialization.
         full_transform = extra_transform if dataset.transform is None else T.Compose([dataset.transform, extra_transform])
-        dataset = dataset.map(full_transform)
-        dataset.transform = None
+        if hasattr(dataset, 'map'):
+            dataset = dataset.map(full_transform)
+            dataset.transform = None
+        else:
+            data_list = [full_transform(dataset[i]) for i in range(len(dataset))]
+
+            class _Mapped(InMemoryDataset):
+                def __init__(self, dl):
+                    super().__init__(root=None)
+                    self.data, self.slices = self.collate(dl)
+
+            dataset = _Mapped(data_list)
 
     return dataset
