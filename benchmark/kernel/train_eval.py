@@ -31,12 +31,10 @@ def cross_validation_with_val_set(dataset, model, folds, epochs, batch_size,
 
     val_losses, val_accs, accs, durations = [], [], [], []
     if use_inner_val:
-        # Match the splitting scheme in lacorepool_graph_classification.py:
-        # outer 10-fold CV (train/test), with an inner stratified split on
+        # Outer 10-fold CV (train/test), with an inner stratified split on
         # the training portion to build the validation set. We do not carve
         # out the "previous fold" as an additional validation set (unlike
-        # the original kernel benchmark), so the effective train/val/test
-        # proportions mirror the reference script.
+        # the original kernel benchmark)
         outer_skf = StratifiedKFold(folds, shuffle=True, random_state=kfold_seed)
         fold_splits = list(outer_skf.split(torch.zeros(len(dataset)), dataset.y))
     else:
@@ -57,15 +55,6 @@ def cross_validation_with_val_set(dataset, model, folds, epochs, batch_size,
             inner_train_sub, inner_val_sub = next(skf.split(torch.arange(len(train_idx)), labels))
             train_ids = train_idx[inner_train_sub]
             val_ids = train_idx[inner_val_sub]
-
-            # Helpful debug signal to ensure we match the reference script.
-            print(
-                f"[LaCore split] fold {fold + 1}/{folds}: "
-                f"train={len(train_ids)} val={len(val_ids)} test={len(test_idx)} | "
-                f"train_hist={_label_hist(train_ids)} "
-                f"val_hist={_label_hist(val_ids)} "
-                f"test_hist={_label_hist(test_idx)}"
-            )
         else:
             train_idx, test_idx, val_idx = split
             train_ids = train_idx

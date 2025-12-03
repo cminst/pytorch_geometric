@@ -23,6 +23,7 @@ parser.add_argument('--batch_size', type=int, default=128)
 parser.add_argument('--lr', type=float, default=0.01)
 parser.add_argument('--lr_decay_factor', type=float, default=0.5)
 parser.add_argument('--lr_decay_step_size', type=int, default=50)
+parser.add_argument('--verbose', '-v', action='store_true', default=False, help='Logs training stats')
 args = parser.parse_args()
 
 layers = [1, 2, 3, 4, 5]
@@ -33,12 +34,12 @@ nets = [
     # GraphSAGEWithJK,
     # GIN0WithJK,
     # GINWithJK,
-    # Graclus,
-    # TopK,
+    Graclus,
+    TopK,
     # SAGPool,
     # DiffPool,
     # EdgePool,
-    # GCN,
+    GCN,
     # GraphSAGE,
     # GIN0,
     # GIN,
@@ -58,12 +59,14 @@ def logger(info):
     test_acc = info['test_acc']
     best_test = info.get('test_acc_at_best_val', test_acc)
     best_epoch = info.get('best_epoch', epoch)
-    print(f'{fold:02d}/{epoch:03d}: '
-          f'Train Acc: {train_acc:.3f}, '
-          f'Val Acc: {val_acc:.3f}, '
-          f'Val Loss: {val_loss:.4f}, '
-          f'Test Acc: {test_acc:.3f}, '
-          f'Test@Best Val: {best_test:.3f} (epoch {best_epoch})')
+
+    if args.verbose:
+        print(f'{fold:02d}/{epoch:03d}: '
+            f'Train Acc: {train_acc:.3f}, '
+            f'Val Acc: {val_acc:.3f}, '
+            f'Val Loss: {val_loss:.4f}, '
+            f'Test Acc: {test_acc:.3f}, '
+            f'Test@Best Val: {best_test:.3f} (epoch {best_epoch})')
 
 
 results = []
