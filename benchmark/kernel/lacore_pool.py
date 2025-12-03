@@ -112,7 +112,9 @@ class LaCore(torch.nn.Module):
         post_max = global_max_pool(x, batch_pooled)
 
         g = torch.cat([pre_mean, pre_max, post_mean, post_max], dim=-1)
-        out = self.lin(g)
+        # Return log-probabilities to match the benchmark training loop,
+        # which optimizes with NLL loss.
+        out = F.log_softmax(self.lin(g), dim=-1)
         return out
 
     def __repr__(self):
