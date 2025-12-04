@@ -1,9 +1,25 @@
 import torch
 import torch.nn.functional as F
 from torch.nn import Linear, Sequential, ReLU, Dropout
+from dataclasses import dataclass
+from typing import Optional
 
 from graph_classif_utils import compute_lacore_cover_for_graph
 from torch_geometric.nn import GCNConv, global_mean_pool, global_max_pool, LaCorePooling
+
+
+@dataclass
+class HyperParams:
+    hidden: int = 64
+    lr: float = 1e-4
+    dropout: float = 0.2
+    batch_size: int = 64
+    epochs: int = 500
+    weight_decay: float = 1e-3
+    epsilon: float = 0.1
+    target_ratio: float = 0.25
+    min_size: int = 4
+    max_clusters: Optional[int] = None
 
 
 class LaCoreAssignment:
@@ -32,20 +48,15 @@ class LaCore(torch.nn.Module):
 
     @staticmethod
     def default_hparams(dataset_name: str):
-        base = {
-            'hidden': 64,
-            'lr': 1e-4,
-            'dropout': 0.2,
-            'batch_size': 64,
-            'epochs': 500,
-            'weight_decay': 1e-3,
-            'epsilon': 0.1,
-            'target_ratio': 0.25,
-            'min_size': 4,
-            'max_clusters': None,
-        }
+        """
+        Return a HyperParams instance with default values, overridden by
+        dataset‑specific settings if they exist.
+        """
+        # Start with the defaults defined in the HyperParams dataclass.
+        hp = HyperParams()
 
-        table = {
+        # Dataset‑specific overrides.
+        overrides = {
             'DD': {'hidden': 128, 'lr': 1e-4, 'dropout': 0.15,
                    'batch_size': 64, 'epochs': 500},
             'PROTEINS': {'hidden': 128, 'lr': 5e-4, 'dropout': 0.1,
@@ -59,12 +70,16 @@ class LaCore(torch.nn.Module):
             'FRANKENSTEIN': {'hidden': 128, 'lr': 1e-3, 'dropout': 0.2,
                              'batch_size': 128, 'epochs': 500},
         }
-        overrides = table.get(dataset_name, {})
-        merged = {**base, **overrides}
-        return merged
+
+        # Apply any overrides for the given dataset.
+        for key, value in overrides.get(dataset_name, {}).items():
+            setattr(hp, key, value)
+
+        return hp
 
     def __init__(self, dataset, num_layers, hidden, dropout=0.2):
         super().__init__()
+        assert num_layers >= 2, "LaCore needs to have >= 2 layers!"
         self.conv1 = GCNConv(dataset.num_features, hidden)
 
         # Remaining layers operate after pooling.

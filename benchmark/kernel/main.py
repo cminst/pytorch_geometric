@@ -34,7 +34,7 @@ parser.add_argument('--modelnet_val_ratio', type=float, default=0.1,
                     help='Validation ratio taken from the ModelNet train split.')
 args = parser.parse_args()
 
-layers = [1, 2, 3, 4, 5]
+layers = [2, 3, 4, 5]
 hiddens = [16, 32, 64, 128]
 
 # NOTE: datasets are stored in ../data/DATASET_NAME/DATASET_NAME/[processed|raw]
@@ -101,26 +101,25 @@ for dataset_name, Net in product(datasets, nets):
     best_result = (float('inf'), 0, 0)  # (loss, acc, std)
     print(f'--\n{dataset_name} - {Net.__name__}')
     if Net is LaCore:
-        print("Overriding hyperparams with LaCore optimal settings")
         params = LaCore.default_hparams(dataset_name)
+        print("Overriding hyperparams with LaCore optimal settings")
         print(params)
-        layer_grid = [2]  # Script uses one conv pre-pool and one post-pool.
-        hidden_grid = [params['hidden']]
-        lr = params['lr']
-        weight_decay = params['weight_decay']
-        epochs = params['epochs']
-        batch_size = params['batch_size']
-        lr_decay_factor = 1.0  # Script trains with a fixed LR.
-        lr_decay_step_size = epochs + 1  # Disable decay.
-        dropout = params['dropout']
+
+        hidden_grid = [params.hidden]
+        lr = params.lr
+        weight_decay = params.weight_decay
+        epochs = params.epochs
+        batch_size = params.batch_size
+        lr_decay_factor = args.lr_decay_factor
+        lr_decay_step_size = args.lr_decay_step_size
+        dropout = params.dropout
         extra_transform = LaCoreAssignment(
-            epsilon=params.get('epsilon', 0.1),
-            target_ratio=params.get('target_ratio', 0.25),
-            min_size=params.get('min_size', 4),
-            max_clusters=params.get('max_clusters', None),
+            epsilon=params.epsilon,
+            target_ratio=params.target_ratio,
+            min_size=params.min_size,
+            max_clusters=params.max_clusters,
         )
     else:
-        layer_grid = layers
         hidden_grid = hiddens
         lr = args.lr
         weight_decay = 0
@@ -131,13 +130,16 @@ for dataset_name, Net in product(datasets, nets):
         dropout = None
         extra_transform = getattr(Net, 'extra_transform', None)
 
+    layer_grid = layers
+
+    dataset = get_dataset(
+        dataset_name,
+        sparse=Net != DiffPool,
+        extra_transform=extra_transform,
+        dataset_config=dataset_config,
+    )
+
     for num_layers, hidden in product(layer_grid, hidden_grid):
-        dataset = get_dataset(
-            dataset_name,
-            sparse=Net != DiffPool,
-            extra_transform=extra_transform,
-            dataset_config=dataset_config,
-        )
         use_single_split = isinstance(dataset, tuple)
         if use_single_split:
             train_dataset, test_dataset = dataset
