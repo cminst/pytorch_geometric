@@ -3,6 +3,7 @@ import time
 import torch
 import torch.nn.functional as F
 import numpy as np
+from tqdm import tqdm
 from sklearn.model_selection import StratifiedKFold, train_test_split
 from torch import tensor
 from torch.optim import Adam
@@ -41,7 +42,14 @@ def cross_validation_with_val_set(dataset, model, folds, epochs, batch_size,
     else:
         fold_splits = list(zip(*k_fold(dataset, folds, seed=kfold_seed)))
 
-    for fold, split in enumerate(fold_splits):
+    fold_iter = tqdm(
+        fold_splits,
+        total=len(fold_splits),
+        desc="Folds",
+        ascii=True,
+    )
+
+    for fold, split in enumerate(fold_iter):
         best_val_metric = -float('inf') if selection_metric == 'acc' else float('inf')
         best_test_at_val = 0.0
         best_epoch = 0
@@ -198,7 +206,14 @@ def single_split_train_eval(
     best_epoch = 0
 
     t_start = time.perf_counter()
-    for epoch in range(1, epochs + 1):
+    epoch_iter = tqdm(
+        range(1, epochs + 1),
+        total=epochs,
+        desc="Train epochs",
+        ascii=True,
+    )
+
+    for epoch in epoch_iter:
         train_loss = train(model, optimizer, train_loader)
         train_acc = eval_acc(model, train_loader)
         val_loss = eval_loss(model, val_loader)
