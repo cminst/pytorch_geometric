@@ -99,7 +99,7 @@ def logger(info):
 results = []
 for dataset_name, Net in product(datasets, nets):
     best_result = (float('inf'), 0, 0)  # (loss, acc, std)
-    print(f'--\n{dataset_name} - {Net.__name__}')
+    print(f'----------\n{dataset_name} - {Net.__name__}')
     if Net is LaCore:
         params = LaCore.default_hparams(dataset_name)
         print("Overriding hyperparams with LaCore optimal settings")
@@ -132,12 +132,14 @@ for dataset_name, Net in product(datasets, nets):
 
     layer_grid = layers
 
+    print(f"Loading dataset {dataset_name}...")
     dataset = get_dataset(
         dataset_name,
         sparse=Net != DiffPool,
         extra_transform=extra_transform,
         dataset_config=dataset_config,
     )
+    print("Dataset loaded")
 
     for num_layers, hidden in product(layer_grid, hidden_grid):
         use_single_split = isinstance(dataset, tuple)
