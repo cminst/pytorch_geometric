@@ -42,6 +42,7 @@ def get_dataset(
         num = '40' if name.endswith('40') else '10'
         cfg = _select_config(dataset_config, name)
         canonical_split = cfg.get('canonical_split', True)
+        precompute = cfg.get('precompute', True)
 
         class PosToX:
             def __call__(self, data):
@@ -60,8 +61,27 @@ def get_dataset(
             'root',
             osp.join(osp.dirname(osp.realpath(__file__)), '..', 'data', 'ModelNet'),
         )
-        train_ds = ModelNet(root=root, name=num, train=True, transform=full_transform)
-        test_ds = ModelNet(root=root, name=num, train=False, transform=full_transform)
+
+        def _materialize(ds):
+            data_list = [full_transform(ds[i]) for i in range(len(ds))]
+
+            class _Materialized(InMemoryDataset):
+                def __init__(self, dl):
+                    super().__init__(root=None)
+                    self.data, self.slices = self.collate(dl)
+
+            out = _Materialized(data_list)
+            out.transform = None
+            return out
+
+        if precompute:
+            train_raw = ModelNet(root=root, name=num, train=True, transform=None)
+            test_raw = ModelNet(root=root, name=num, train=False, transform=None)
+            train_ds = _materialize(train_raw)
+            test_ds = _materialize(test_raw)
+        else:
+            train_ds = ModelNet(root=root, name=num, train=True, transform=full_transform)
+            test_ds = ModelNet(root=root, name=num, train=False, transform=full_transform)
 
         if canonical_split:
             return train_ds, test_ds
