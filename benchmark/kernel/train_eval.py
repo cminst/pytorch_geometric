@@ -2,7 +2,8 @@ import time
 
 import torch
 import torch.nn.functional as F
-from sklearn.model_selection import StratifiedKFold
+import numpy as np
+from sklearn.model_selection import StratifiedKFold, train_test_split
 from torch import tensor
 from torch.optim import Adam
 
@@ -143,6 +144,125 @@ def cross_validation_with_val_set(dataset, model, folds, epochs, batch_size,
           f'± {acc_std:.3f}, Duration: {duration_mean:.3f}')
 
     return loss_mean, acc_mean, acc_std
+
+
+def single_split_train_eval(
+    train_dataset,
+    test_dataset,
+    model,
+    epochs,
+    batch_size,
+    lr,
+    lr_decay_factor,
+    lr_decay_step_size,
+    weight_decay,
+    val_ratio=0.1,
+    logger=None,
+    selection_metric='acc',
+    seed=42,
+):
+    """Train/val/test on a single split (used for ModelNet canonical splits)."""
+    labels = train_dataset.y.view(-1).cpu().numpy()
+    train_idx, val_idx = train_test_split(
+        np.arange(len(train_dataset)),
+        test_size=val_ratio,
+        stratify=labels,
+        random_state=seed,
+    )
+    train_subset = train_dataset[torch.as_tensor(train_idx, dtype=torch.long)]
+    val_subset = train_dataset[torch.as_tensor(val_idx, dtype=torch.long)]
+
+    if hasattr(train_subset[0], 'adj'):
+        train_loader = DenseLoader(train_subset, batch_size, shuffle=True)
+        val_loader = DenseLoader(val_subset, batch_size, shuffle=False)
+        test_loader = DenseLoader(test_dataset, batch_size, shuffle=False)
+    else:
+        train_loader = DataLoader(train_subset, batch_size, shuffle=True)
+        val_loader = DataLoader(val_subset, batch_size, shuffle=False)
+        test_loader = DataLoader(test_dataset, batch_size, shuffle=False)
+
+    model.to(device).reset_parameters()
+    optimizer = Adam(model.parameters(), lr=lr, weight_decay=weight_decay)
+
+    if torch.cuda.is_available():
+        torch.cuda.synchronize()
+    elif hasattr(torch.backends, 'mps') and torch.backends.mps.is_available():
+        try:
+            torch.mps.synchronize()
+        except ImportError:
+            pass
+
+    val_losses, val_accs, test_accs, durations = [], [], [], []
+    best_val_metric = -float('inf') if selection_metric == 'acc' else float('inf')
+    best_test_at_val = 0.0
+    best_epoch = 0
+
+    t_start = time.perf_counter()
+    for epoch in range(1, epochs + 1):
+        train_loss = train(model, optimizer, train_loader)
+        train_acc = eval_acc(model, train_loader)
+        val_loss = eval_loss(model, val_loader)
+        val_acc = eval_acc(model, val_loader)
+        test_acc = eval_acc(model, test_loader)
+
+        val_losses.append(val_loss)
+        val_accs.append(val_acc)
+        test_accs.append(test_acc)
+
+        val_metric = val_acc if selection_metric == 'acc' else val_loss
+        if (selection_metric == 'acc' and val_metric > best_val_metric) or (
+                selection_metric != 'acc' and val_metric < best_val_metric):
+            best_val_metric = val_metric
+            best_test_at_val = test_acc
+            best_epoch = epoch
+
+        eval_info = {
+            'fold': 0,
+            'epoch': epoch,
+            'train_loss': train_loss,
+            'train_acc': train_acc,
+            'val_loss': val_loss,
+            'val_acc': val_acc,
+            'test_acc': test_acc,
+            'test_acc_at_best_val': best_test_at_val,
+            'best_epoch': best_epoch,
+        }
+        if logger is not None and (epoch == 1 or epoch % 20 == 0 or epoch == epochs):
+            logger(eval_info)
+
+        if epoch % lr_decay_step_size == 0:
+            for param_group in optimizer.param_groups:
+                param_group['lr'] = lr_decay_factor * param_group['lr']
+
+    if torch.cuda.is_available():
+        torch.cuda.synchronize()
+    elif hasattr(torch.backends, 'mps') and torch.backends.mps.is_available():
+        torch.mps.synchronize()
+
+    t_end = time.perf_counter()
+    durations.append(t_end - t_start)
+
+    val_losses_t = tensor(val_losses)
+    val_accs_t = tensor(val_accs)
+    test_accs_t = tensor(test_accs)
+    duration_t = tensor(durations)
+
+    if selection_metric == 'acc':
+        best_val = val_accs_t.max()
+        loss_out = (1.0 - best_val.item())  # smaller is better for selection
+        test_at_best = test_accs_t[val_accs_t.argmax()].item()
+    else:
+        best_val = val_losses_t.min()
+        loss_out = best_val.item()
+        test_at_best = test_accs_t[val_losses_t.argmin()].item()
+
+    acc_mean = test_at_best
+    acc_std = 0.0
+    duration_mean = duration_t.mean().item()
+    print(f'Val Metric: {best_val.item():.4f}, Test Accuracy: {acc_mean:.3f} '
+          f'± {acc_std:.3f}, Duration: {duration_mean:.3f}')
+
+    return loss_out, acc_mean, acc_std
 
 
 def k_fold(dataset, folds, seed=12345):

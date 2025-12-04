@@ -41,6 +41,7 @@ def get_dataset(
     if name in {'ModelNet40', 'ModelNet10'}:
         num = '40' if name.endswith('40') else '10'
         cfg = _select_config(dataset_config, name)
+        canonical_split = cfg.get('canonical_split', True)
 
         class PosToX:
             def __call__(self, data):
@@ -61,6 +62,9 @@ def get_dataset(
         )
         train_ds = ModelNet(root=root, name=num, train=True, transform=full_transform)
         test_ds = ModelNet(root=root, name=num, train=False, transform=full_transform)
+
+        if canonical_split:
+            return train_ds, test_ds
 
         data_list = [train_ds[i] for i in range(len(train_ds))]
         data_list += [test_ds[i] for i in range(len(test_ds))]

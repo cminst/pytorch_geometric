@@ -15,7 +15,7 @@ from set2set import Set2SetNet
 from sort_pool import SortPool
 from top_k import TopK
 from lacore_pool import LaCore, LaCoreAssignment
-from train_eval import cross_validation_with_val_set
+from train_eval import cross_validation_with_val_set, single_split_train_eval
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--epochs', type=int, default=500)
@@ -30,6 +30,8 @@ parser.add_argument('--modelnet_num_points', type=int, default=1024,
                     help='Number of points to sample per mesh for ModelNet datasets.')
 parser.add_argument('--modelnet_knn_k', type=int, default=16,
                     help='k for KNN graph construction on ModelNet datasets.')
+parser.add_argument('--modelnet_val_ratio', type=float, default=0.1,
+                    help='Validation ratio taken from the ModelNet train split.')
 args = parser.parse_args()
 
 layers = [1, 2, 3, 4, 5]
@@ -48,6 +50,8 @@ if any(name.startswith('ModelNet') for name in datasets):
     modelnet_cfg = {
         'num_points': args.modelnet_num_points,
         'knn_k': args.modelnet_knn_k,
+        'canonical_split': True,
+        'val_ratio': args.modelnet_val_ratio,
     }
     dataset_config['ModelNet40'] = modelnet_cfg
     dataset_config['ModelNet10'] = modelnet_cfg
@@ -134,25 +138,52 @@ for dataset_name, Net in product(datasets, nets):
             extra_transform=extra_transform,
             dataset_config=dataset_config,
         )
+        use_single_split = isinstance(dataset, tuple)
+        if use_single_split:
+            train_dataset, test_dataset = dataset
+            dataset_for_model = train_dataset
+        else:
+            dataset_for_model = dataset
+
         model_kwargs = {}
         if Net is LaCore:
             model_kwargs['dropout'] = dropout
-        model = Net(dataset, num_layers, hidden, **model_kwargs)
-        loss, acc, std = cross_validation_with_val_set(
-            dataset,
-            model,
-            folds=10,
-            epochs=epochs,
-            batch_size=batch_size,
-            lr=lr,
-            lr_decay_factor=lr_decay_factor,
-            lr_decay_step_size=lr_decay_step_size,
-            weight_decay=weight_decay,
-            logger=logger,
-            selection_metric='acc' if Net is LaCore else 'loss',
-            kfold_seed=42 if Net is LaCore else 12345,
-            use_inner_val=(Net is LaCore),
-        )
+        model = Net(dataset_for_model, num_layers, hidden, **model_kwargs)
+
+        selection_metric = 'loss'
+        if use_single_split:
+            val_ratio = dataset_config.get(dataset_name, {}).get('val_ratio', 0.1)
+            loss, acc, std = single_split_train_eval(
+                train_dataset,
+                test_dataset,
+                model,
+                epochs=epochs,
+                batch_size=batch_size,
+                lr=lr,
+                lr_decay_factor=lr_decay_factor,
+                lr_decay_step_size=lr_decay_step_size,
+                weight_decay=weight_decay,
+                val_ratio=val_ratio,
+                logger=logger,
+                selection_metric=selection_metric,
+                seed=42,
+            )
+        else:
+            loss, acc, std = cross_validation_with_val_set(
+                dataset,
+                model,
+                folds=10,
+                epochs=epochs,
+                batch_size=batch_size,
+                lr=lr,
+                lr_decay_factor=lr_decay_factor,
+                lr_decay_step_size=lr_decay_step_size,
+                weight_decay=weight_decay,
+                logger=logger,
+                selection_metric=selection_metric,
+                kfold_seed=42,
+                use_inner_val=(Net is LaCore),
+            )
         if loss < best_result[0]:
             best_result = (loss, acc, std)
 
