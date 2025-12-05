@@ -49,13 +49,18 @@ def get_dataset(
                 data.x = data.pos
                 return data
 
-        base_transform = T.Compose([
+        full_transform_steps = [
             T.SamplePoints(cfg.get('num_points', 1024)),
             T.NormalizeScale(),
             T.KNNGraph(k=cfg.get('knn_k', 16), force_undirected=True),
             PosToX(),
-        ])
-        full_transform = base_transform if extra_transform is None else T.Compose([base_transform, extra_transform])
+        ]
+        if extra_transform is not None:
+            full_transform_steps.append(extra_transform)
+        if not sparse:
+            dense_nodes = cfg.get('num_points', 1024)
+            full_transform_steps.append(T.ToDense(dense_nodes))
+        full_transform = T.Compose(full_transform_steps)
 
         root = cfg.get(
             'root',
