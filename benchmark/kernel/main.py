@@ -61,12 +61,12 @@ nets = [
     # GraphSAGEWithJK,
     # GIN0WithJK,
     # GINWithJK,
-    Graclus,
-    TopK,
-    # SAGPool,
     # DiffPool,
+    # Graclus,
+    # TopK, # ~89%
+    # SAGPool,
     # EdgePool,
-    GCN,
+    # GCN,
     # GraphSAGE,
     # GIN0,
     # GIN,
@@ -74,7 +74,7 @@ nets = [
     # Set2SetNet,
     # SortPool,
     # ASAP,
-    LaCore,
+    LaCore, # 77%
 ]
 
 
@@ -102,16 +102,11 @@ for dataset_name, Net in product(datasets, nets):
     print(f'----------\n{dataset_name} - {Net.__name__}')
     if Net is LaCore:
         params = LaCore.default_hparams(dataset_name)
-        print("Overriding hyperparams with LaCore optimal settings")
+        print("Overriding hyperparams with LaCore optimal settings:")
         print(params)
 
-        hidden_grid = [params.hidden]
-        lr = params.lr
         weight_decay = params.weight_decay
         epochs = params.epochs
-        batch_size = params.batch_size
-        lr_decay_factor = args.lr_decay_factor
-        lr_decay_step_size = args.lr_decay_step_size
         dropout = params.dropout
         extra_transform = LaCoreAssignment(
             epsilon=params.epsilon,
@@ -120,17 +115,17 @@ for dataset_name, Net in product(datasets, nets):
             max_clusters=params.max_clusters,
         )
     else:
-        hidden_grid = hiddens
-        lr = args.lr
         weight_decay = 0
         epochs = args.epochs
-        batch_size = args.batch_size
-        lr_decay_factor = args.lr_decay_factor
-        lr_decay_step_size = args.lr_decay_step_size
         dropout = None
         extra_transform = getattr(Net, 'extra_transform', None)
 
+    lr = args.lr
+    hidden_grid = hiddens
     layer_grid = layers
+    batch_size = args.batch_size
+    lr_decay_factor = args.lr_decay_factor
+    lr_decay_step_size = args.lr_decay_step_size
 
     print(f"Loading dataset {dataset_name}...")
     dataset = get_dataset(

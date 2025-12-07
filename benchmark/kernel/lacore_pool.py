@@ -10,10 +10,7 @@ from torch_geometric.nn import GCNConv, global_mean_pool, global_max_pool, LaCor
 
 @dataclass
 class HyperParams:
-    hidden: int = 64
-    lr: float = 1e-4
     dropout: float = 0.2
-    batch_size: int = 64
     epochs: int = 500
     weight_decay: float = 1e-3
     epsilon: float = 0.1
@@ -57,18 +54,13 @@ class LaCore(torch.nn.Module):
 
         # Dataset‑specific overrides.
         overrides = {
-            'DD': {'hidden': 128, 'lr': 1e-4, 'dropout': 0.15,
-                   'batch_size': 64, 'epochs': 500},
-            'PROTEINS': {'hidden': 128, 'lr': 5e-4, 'dropout': 0.1,
-                         'batch_size': 128, 'epochs': 500},
-            'ModelNet40': {'batch_size': 32, 'epsilon': 1e3, 'target_ratio': 0.5},
-            'ModelNet10': {'batch_size': 32, 'epsilon': 1e3, 'target_ratio': 0.5},
-            'NCI1': {'hidden': 256, 'lr': 5e-4, 'dropout': 0.4,
-                     'batch_size': 256, 'epochs': 500},
-            'NCI109': {'hidden': 128, 'lr': 5e-4, 'dropout': 0.2,
-                       'batch_size': 64, 'epochs': 500},
-            'FRANKENSTEIN': {'hidden': 128, 'lr': 1e-3, 'dropout': 0.2,
-                             'batch_size': 128, 'epochs': 500},
+            'DD': {'dropout': 0.15, 'epochs': 500},
+            'PROTEINS': {'dropout': 0.1, 'epochs': 500},
+            'ModelNet40': {'epsilon': 1e3, 'target_ratio': 0.5},
+            'ModelNet10': {'epsilon': 1e3, 'target_ratio': 0.5},
+            'NCI1': {'dropout': 0.4, 'epochs': 500},
+            'NCI109': {'dropout': 0.2, 'epochs': 500},
+            'FRANKENSTEIN': {'dropout': 0.2, 'epochs': 500},
         }
 
         # Apply any overrides for the given dataset.
