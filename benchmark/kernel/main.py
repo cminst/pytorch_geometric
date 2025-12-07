@@ -1,4 +1,5 @@
 import argparse
+from dataclasses import replace
 from itertools import product
 
 from asap import ASAP
@@ -35,7 +36,8 @@ parser.add_argument('--modelnet_val_ratio', type=float, default=0.1,
 args = parser.parse_args()
 
 layers = [2, 3, 4, 5]
-hiddens = [16, 32, 64, 128]
+hiddens = [64, 128] # previously 16,32,64,128
+lacore_epsilons = [0.001, 100, 10000]
 
 # NOTE: datasets are stored in ../data/DATASET_NAME/DATASET_NAME/[processed|raw]
 default_datasets = ['PROTEINS'] # ['MUTAG', 'PROTEINS', 'IMDB-BINARY', 'REDDIT-BINARY', 'COLLAB']
@@ -99,26 +101,8 @@ def logger(info):
 results = []
 for dataset_name, Net in product(datasets, nets):
     best_result = (float('inf'), 0, 0)  # (loss, acc, std)
+    best_config = None
     print(f'----------\n{dataset_name} - {Net.__name__}')
-    if Net is LaCore:
-        params = LaCore.default_hparams(dataset_name)
-        print("Overriding hyperparams with LaCore optimal settings:")
-        print(params)
-
-        weight_decay = params.weight_decay
-        epochs = params.epochs
-        dropout = params.dropout
-        extra_transform = LaCoreAssignment(
-            epsilon=params.epsilon,
-            target_ratio=params.target_ratio,
-            min_size=params.min_size,
-            max_clusters=params.max_clusters,
-        )
-    else:
-        weight_decay = 0
-        epochs = args.epochs
-        dropout = None
-        extra_transform = getattr(Net, 'extra_transform', None)
 
     lr = args.lr
     hidden_grid = hiddens
@@ -127,67 +111,101 @@ for dataset_name, Net in product(datasets, nets):
     lr_decay_factor = args.lr_decay_factor
     lr_decay_step_size = args.lr_decay_step_size
 
-    print(f"Loading dataset {dataset_name}...")
-    dataset = get_dataset(
-        dataset_name,
-        sparse=Net != DiffPool,
-        extra_transform=extra_transform,
-        dataset_config=dataset_config,
-    )
-    print("Dataset loaded")
+    epsilon_grid = lacore_epsilons if Net is LaCore else [None]
+    base_params = None
+    if Net is LaCore:
+        base_params = LaCore.default_hparams(dataset_name)
+        print("Overriding hyperparams with LaCore optimal settings:")
+        print(base_params)
 
-    for num_layers, hidden in product(layer_grid, hidden_grid):
-        use_single_split = isinstance(dataset, tuple)
-        if use_single_split:
-            train_dataset, test_dataset = dataset
-            dataset_for_model = train_dataset
-        else:
-            dataset_for_model = dataset
-
-        model_kwargs = {}
+    for epsilon in epsilon_grid:
         if Net is LaCore:
-            model_kwargs['dropout'] = dropout
-        model = Net(dataset_for_model, num_layers, hidden, **model_kwargs)
-
-        selection_metric = 'loss'
-        if use_single_split:
-            val_ratio = dataset_config.get(dataset_name, {}).get('val_ratio', 0.1)
-            loss, acc, std = single_split_train_eval(
-                train_dataset,
-                test_dataset,
-                model,
-                epochs=epochs,
-                batch_size=batch_size,
-                lr=lr,
-                lr_decay_factor=lr_decay_factor,
-                lr_decay_step_size=lr_decay_step_size,
-                weight_decay=weight_decay,
-                val_ratio=val_ratio,
-                logger=logger,
-                selection_metric=selection_metric,
-                seed=42,
+            params = replace(base_params, epsilon=epsilon)
+            weight_decay = params.weight_decay
+            epochs = params.epochs
+            dropout = params.dropout
+            extra_transform = LaCoreAssignment(
+                epsilon=params.epsilon,
+                target_ratio=params.target_ratio,
+                min_size=params.min_size,
+                max_clusters=params.max_clusters,
             )
+            print(f"Running epsilon={params.epsilon}")
         else:
-            loss, acc, std = cross_validation_with_val_set(
-                dataset,
-                model,
-                folds=10,
-                epochs=epochs,
-                batch_size=batch_size,
-                lr=lr,
-                lr_decay_factor=lr_decay_factor,
-                lr_decay_step_size=lr_decay_step_size,
-                weight_decay=weight_decay,
-                logger=logger,
-                selection_metric=selection_metric,
-                kfold_seed=42,
-                use_inner_val=(Net is LaCore),
-            )
-        if loss < best_result[0]:
-            best_result = (loss, acc, std)
+            weight_decay = 0
+            epochs = args.epochs
+            dropout = None
+            extra_transform = getattr(Net, 'extra_transform', None)
+
+        print(f"Loading dataset {dataset_name}...")
+        dataset = get_dataset(
+            dataset_name,
+            sparse=Net != DiffPool,
+            extra_transform=extra_transform,
+            dataset_config=dataset_config,
+        )
+        print("Dataset loaded")
+
+        for num_layers, hidden in product(layer_grid, hidden_grid):
+            use_single_split = isinstance(dataset, tuple)
+            if use_single_split:
+                train_dataset, test_dataset = dataset
+                dataset_for_model = train_dataset
+            else:
+                dataset_for_model = dataset
+
+            model_kwargs = {}
+            if Net is LaCore:
+                model_kwargs['dropout'] = dropout
+            model = Net(dataset_for_model, num_layers, hidden, **model_kwargs)
+
+            selection_metric = 'loss'
+            if use_single_split:
+                val_ratio = dataset_config.get(dataset_name, {}).get('val_ratio', 0.1)
+                loss, acc, std = single_split_train_eval(
+                    train_dataset,
+                    test_dataset,
+                    model,
+                    epochs=epochs,
+                    batch_size=batch_size,
+                    lr=lr,
+                    lr_decay_factor=lr_decay_factor,
+                    lr_decay_step_size=lr_decay_step_size,
+                    weight_decay=weight_decay,
+                    val_ratio=val_ratio,
+                    logger=logger,
+                    selection_metric=selection_metric,
+                    seed=42,
+                )
+            else:
+                loss, acc, std = cross_validation_with_val_set(
+                    dataset,
+                    model,
+                    folds=10,
+                    epochs=epochs,
+                    batch_size=batch_size,
+                    lr=lr,
+                    lr_decay_factor=lr_decay_factor,
+                    lr_decay_step_size=lr_decay_step_size,
+                    weight_decay=weight_decay,
+                    logger=logger,
+                    selection_metric=selection_metric,
+                    kfold_seed=42,
+                    use_inner_val=(Net is LaCore),
+                )
+            if loss < best_result[0]:
+                best_result = (loss, acc, std)
+                best_config = {
+                    'num_layers': num_layers,
+                    'hidden': hidden,
+                }
+                if Net is LaCore:
+                    best_config['epsilon'] = params.epsilon
 
     desc = f'{best_result[1]:.3f} ± {best_result[2]:.3f}'
+    if best_config is not None:
+        print(f'Best config: {best_config}')
     print(f'Best result - {desc}')
-    results += [f'{dataset_name} - {model}: {desc}']
+    results += [f'{dataset_name} - {Net.__name__}: {desc}']
 results = '\n'.join(results)
 print(f'--\n{results}')
