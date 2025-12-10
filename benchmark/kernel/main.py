@@ -22,26 +22,6 @@ LAYERS = [2, 3, 4, 5]
 HIDDEN_SIZES = [64, 128]
 LACORE_EPSILONS = [0.001, 100, 10000]
 DEFAULT_DATASETS = ['PROTEINS']
-AVAILABLE_NETS = [
-    ASAP,
-    DiffPool,
-    EdgePool,
-    GCN,
-    GCNWithJK,
-    GIN,
-    GIN0,
-    GIN0WithJK,
-    GINWithJK,
-    GlobalAttentionNet,
-    Graclus,
-    GraphSAGE,
-    GraphSAGEWithJK,
-    Set2SetNet,
-    Set2SetNet,
-    SortPool,
-    TopK,
-    LaCore,
-]
 DEFAULT_NETS = [LaCore]
 
 def build_parser():
@@ -63,6 +43,8 @@ def build_parser():
                         help='Validation ratio taken from the ModelNet train split.')
     parser.add_argument('--nets', type=str, default=None,
                         help="Comma-separated net names (e.g., 'GCN,LaCore'). Case sensitive.")
+    parser.add_argument('--dataset_root', type=str, default=None,
+                        help='Root directory that holds the datasets.')
     return parser
 
 
@@ -177,6 +159,7 @@ def run_experiments(dataset_names, dataset_config, args):
                 sparse=Net != DiffPool,
                 extra_transform=training_setup['extra_transform'],
                 dataset_config=dataset_config,
+                dataset_root=args.dataset_root,
             )
             print("Dataset loaded")
             for num_layers, hidden in product(LAYERS, HIDDEN_SIZES):

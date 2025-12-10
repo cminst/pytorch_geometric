@@ -34,6 +34,7 @@ def get_dataset(
     cleaned=False,
     extra_transform=None,
     dataset_config=None,
+    dataset_root=None,
 ):
     # ModelNet10/40 support: build point-cloud graphs the same way as
     # lacore_3d_pooling.py (SamplePoints -> NormalizeScale -> KNNGraph,
@@ -62,9 +63,10 @@ def get_dataset(
             full_transform_steps.append(T.ToDense(dense_nodes))
         full_transform = T.Compose(full_transform_steps)
 
+        default_root = osp.join(osp.dirname(osp.realpath(__file__)), '..', 'data', 'ModelNet')
         root = cfg.get(
             'root',
-            osp.join(osp.dirname(osp.realpath(__file__)), '..', 'data', 'ModelNet'),
+            osp.join(dataset_root, 'ModelNet') if dataset_root else default_root,
         )
 
         def _materialize(ds):
@@ -103,7 +105,8 @@ def get_dataset(
         dataset.transform = None
         return dataset
 
-    path = osp.join(osp.dirname(osp.realpath(__file__)), '..', 'data', name)
+    default_path = osp.join(osp.dirname(osp.realpath(__file__)), '..', 'data', name)
+    path = osp.join(dataset_root, name) if dataset_root else default_path
     dataset = TUDataset(path, name, cleaned=cleaned)
     dataset._data.edge_attr = None
 
