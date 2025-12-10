@@ -37,7 +37,7 @@ args = parser.parse_args()
 
 layers = [2, 3, 4, 5]
 hiddens = [64, 128] # previously 16,32,64,128
-lacore_epsilons = [0.001, 100, 10000]
+lacore_epsilons = [0.001, 10, 10000]
 
 # NOTE: datasets are stored in ../data/DATASET_NAME/DATASET_NAME/[processed|raw]
 default_datasets = ['PROTEINS'] # ['MUTAG', 'PROTEINS', 'IMDB-BINARY', 'REDDIT-BINARY', 'COLLAB']
@@ -65,20 +65,26 @@ nets = [
     # GINWithJK,
     # DiffPool,
     # Graclus,
-    # TopK, # ~89%
+    # TopK,
     # SAGPool,
     # EdgePool,
     # GCN,
-    # GraphSAGE,
+    GraphSAGE,
     # GIN0,
-    # GIN,
+    GIN,
     # GlobalAttentionNet,
-    # Set2SetNet,
+    Set2SetNet,
     # SortPool,
     # ASAP,
-    LaCore, # 77%
+    # LaCore,
 ]
-
+# DiffPool: ModelNet10 (87.7%)
+# Graclus: ModelNet10 (87.1%)
+# TopK: ModelNet10 (86.2%)
+# SAGPool: ModelNet10 (87.7%)
+# LaCore: ModelNet10 (90.4%)
+# GCN: ModelNet10 (84.7%)
+# SortPool: ModelNet10 (64.4%)
 
 def logger(info):
     fold, epoch = info['fold'] + 1, info['epoch']
