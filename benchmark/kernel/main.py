@@ -44,7 +44,6 @@ AVAILABLE_NETS = [
 ]
 DEFAULT_NETS = [LaCore]
 
-
 def build_parser():
     """Create the command-line parser for benchmark configuration."""
     parser = argparse.ArgumentParser()
