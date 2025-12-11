@@ -230,7 +230,7 @@ def main():
     dataset_names = resolve_dataset_names(args.datasets)
     dataset_config = build_dataset_config(dataset_names, args)
     results = run_experiments(dataset_names, dataset_config, args)
-    print(f'--\n{"\\n".join(results)}')
+    print('---------\n' + '\n'.join(results))
 
 
 if __name__ == '__main__':
