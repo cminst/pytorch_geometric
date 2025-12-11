@@ -49,7 +49,7 @@ class ComputeSpectralConfig(BaseTransform):
 
         return w.detach()
 
-    def __call__(self, data):
+    def forward(self, data):
         # 1. Compute Laplacian and Eigenvectors
         # L = D - A (normalized)
         edge_index, edge_weight = get_laplacian(data.edge_index, normalization='sym', num_nodes=data.num_nodes)
