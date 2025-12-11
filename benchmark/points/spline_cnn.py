@@ -2,8 +2,8 @@ import argparse
 
 import torch
 import torch.nn.functional as F
-from points.datasets import get_dataset
-from points.train_eval import run
+from datasets import get_dataset
+from train_eval import run
 from torch.nn import Linear as Lin
 
 from torch_geometric.nn import SplineConv, fps, global_mean_pool, radius_graph
