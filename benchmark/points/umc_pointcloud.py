@@ -136,8 +136,8 @@ class SpectralProjectionNet(nn.Module):
 
 def parse_args():
     parser = argparse.ArgumentParser(description='UMC Point Cloud Benchmark')
-    parser.add_argument('--dataset_root', type=str, default='benchmark/data/ModelNet',
-                        help='Root directory for datasets (default: benchmark/data/ModelNet)')
+    parser.add_argument('--dataset_root', type=str, default=None,
+                        help='Root directory that holds the datasets (default: None, uses internal default)')
     parser.add_argument('--K', type=int, default=64,
                         help='Number of spectral components (default: 64)')
     parser.add_argument('--num_points', type=int, default=1024,
@@ -165,7 +165,7 @@ def main():
 
     # Determine dataset root (same logic as benchmark/kernel/datasets.py)
     default_root = osp.join(osp.dirname(osp.realpath(__file__)), '..', 'data', 'ModelNet')
-    dataset_root = args.dataset_root if args.dataset_root else default_root
+    dataset_root = osp.join(args.dataset_root, 'ModelNet') if args.dataset_root else default_root
 
     # Transforms
     print("Preparing Data... (This may take a moment for eigen decomposition)")
