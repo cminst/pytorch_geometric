@@ -22,6 +22,25 @@ LAYERS = [2, 3, 4, 5]
 HIDDEN_SIZES = [64, 128]
 LACORE_EPSILONS = [0.001, 100, 10000]
 DEFAULT_DATASETS = ['PROTEINS']
+AVAILABLE_NETS = [
+    ASAP,
+    DiffPool,
+    EdgePool,
+    GCN,
+    GCNWithJK,
+    GIN,
+    GIN0,
+    GIN0WithJK,
+    GINWithJK,
+    GlobalAttentionNet,
+    Graclus,
+    GraphSAGE,
+    GraphSAGEWithJK,
+    Set2SetNet,
+    SortPool,
+    TopK,
+    LaCore,
+]
 DEFAULT_NETS = [LaCore]
 
 def build_parser():
