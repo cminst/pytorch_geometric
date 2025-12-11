@@ -136,20 +136,20 @@ class SpectralProjectionNet(nn.Module):
 
 def parse_args():
     parser = argparse.ArgumentParser(description='UMC Point Cloud Benchmark')
-    parser.add_argument('--dataset_root', type=str, default=None,
+    parser.add_argument('--dataset_root', type=str, default='benchmark/data/ModelNet',
                         help='Root directory for datasets (default: benchmark/data/ModelNet)')
     parser.add_argument('--K', type=int, default=64,
-                        help='Number of spectral components')
+                        help='Number of spectral components (default: 64)')
     parser.add_argument('--num_points', type=int, default=1024,
-                        help='Number of points to sample from each point cloud')
+                        help='Number of points to sample from each point cloud (default: 1024)')
     parser.add_argument('--batch_size', type=int, default=32,
-                        help='Batch size for training')
+                        help='Batch size for training (default: 32)')
     parser.add_argument('--lr', type=float, default=0.001,
-                        help='Learning rate')
+                        help='Learning rate (default: 0.001)')
     parser.add_argument('--epochs', type=int, default=30,
-                        help='Number of training epochs')
+                        help='Number of training epochs (default: 30)')
     parser.add_argument('--knn_k', type=int, default=20,
-                        help='Number of neighbors for KNN graph')
+                        help='Number of neighbors for KNN graph (default: 20)')
     return parser.parse_args()
 
 
