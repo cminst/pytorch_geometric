@@ -27,3 +27,20 @@ For more comprehensive time-measurement and memory usage information, you may us
 ```
 $ python main_performance.py
 ```
+
+# Results
+
+| Pooling         | ModelNet10 Accuracy |
+|-----------------|---------------------|
+| GCN             | 84.7%               |
+| GraphSAGE       | 82.6%               |
+| GIN             | 87.9%               |
+| Set2SetNet      | 87.2%               |
+| DiffPool        | 87.7%               |
+| Graclus         | 87.1%               |
+| TopK            | 86.2%               |
+| SAGPool         | 87.7%               |
+| LaCore          | 90.4%               |
+| SortPool        | 64.4%               |
+| ASAP            | 88.4%               |
+| EdgePool        | 86.5%               |
