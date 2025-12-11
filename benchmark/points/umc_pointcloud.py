@@ -5,6 +5,8 @@ from torch_geometric.datasets import ModelNet
 from torch_geometric.transforms import Compose, SamplePoints, KNNGraph, BaseTransform, NormalizeScale
 from torch_geometric.loader import DataLoader
 from torch_geometric.utils import get_laplacian, to_dense_adj
+import argparse
+import os.path as osp
 
 # Precompute UMC weights
 class ComputeSpectralConfig(BaseTransform):
@@ -131,27 +133,53 @@ class SpectralProjectionNet(nn.Module):
         return F.log_softmax(self.mlp(y), dim=1)
 
 # Training
+
+def parse_args():
+    parser = argparse.ArgumentParser(description='UMC Point Cloud Benchmark')
+    parser.add_argument('--dataset_root', type=str, default=None,
+                        help='Root directory for datasets (default: benchmark/data/ModelNet)')
+    parser.add_argument('--K', type=int, default=64,
+                        help='Number of spectral components')
+    parser.add_argument('--num_points', type=int, default=1024,
+                        help='Number of points to sample from each point cloud')
+    parser.add_argument('--batch_size', type=int, default=32,
+                        help='Batch size for training')
+    parser.add_argument('--lr', type=float, default=0.001,
+                        help='Learning rate')
+    parser.add_argument('--epochs', type=int, default=30,
+                        help='Number of training epochs')
+    parser.add_argument('--knn_k', type=int, default=20,
+                        help='Number of neighbors for KNN graph')
+    return parser.parse_args()
+
+
 def main():
-    # Hyperparameters
-    K = 64  # Captures more shape detail
-    NUM_POINTS = 1024
-    BATCH_SIZE = 32
-    LR = 0.001
-    EPOCHS = 30 # Should see convergence faster now
+    args = parse_args()
+
+    K = args.K
+    NUM_POINTS = args.num_points
+    BATCH_SIZE = args.batch_size
+    LR = args.lr
+    EPOCHS = args.epochs
+    KNN_K = args.knn_k
+
+    # Determine dataset root (same logic as benchmark/kernel/datasets.py)
+    default_root = osp.join(osp.dirname(osp.realpath(__file__)), '..', 'data', 'ModelNet')
+    dataset_root = args.dataset_root if args.dataset_root else default_root
 
     # Transforms
-    # We do the heavy lifting here
-    print("Preparing Data... (This might take a moment for Eigen decomposition)")
+    print("Preparing Data... (This may take a moment for eigen decomposition)")
     pre_transform = Compose([
         SamplePoints(NUM_POINTS),
         NormalizeScale(),
-        KNNGraph(k=20),
+        KNNGraph(k=KNN_K),
         ComputeSpectralConfig(K=K, method='UMC')
     ])
 
-    path = '/tmp/ModelNet10'
-    train_dataset = ModelNet(path, '10', train=True, transform=None, pre_transform=pre_transform)
-    test_dataset = ModelNet(path, '10', train=False, transform=None, pre_transform=pre_transform)
+    train_dataset = ModelNet(dataset_root, '10', train=True, transform=None,
+                            pre_transform=pre_transform)
+    test_dataset = ModelNet(dataset_root, '10', train=False, transform=None,
+                           pre_transform=pre_transform)
 
     train_loader = DataLoader(train_dataset, batch_size=BATCH_SIZE, shuffle=True)
     test_loader = DataLoader(test_dataset, batch_size=BATCH_SIZE, shuffle=False)
@@ -164,7 +192,7 @@ def main():
 
     for epoch in range(1, EPOCHS + 1):
         model.train()
-        total_loss = 0
+        total_loss = 0.0
         correct = 0
         total = 0
 
@@ -172,10 +200,7 @@ def main():
             data = data.to(device)
             optimizer.zero_grad()
 
-            # Input features: We use pos (XYZ)
-            # You could also use Normals if available
             x = data.pos
-
             out = model(x, data.phi, data.umc_weights, data.num_graphs)
             loss = F.nll_loss(out, data.y.squeeze())
             loss.backward()
@@ -189,7 +214,6 @@ def main():
         train_acc = correct / total
         print(f'Epoch {epoch:02d}, Loss: {total_loss/len(train_loader):.4f}, Train Acc: {train_acc:.4f}')
 
-        # Simple Test Loop
         if epoch % 5 == 0:
             model.eval()
             test_correct = 0
