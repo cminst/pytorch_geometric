@@ -160,14 +160,13 @@ def run_experiment(use_umc):
     test_clean_transform = train_transform
 
     test_corrupt_transform = Compose([
-        BiasedSamplePoints(1024), # <--- THE STRESS TEST
+        BiasedSamplePoints(1024), # Stress test
         NormalizeScale(),
         KNNGraph(k=20),
         ComputeSpectralConfig(K=K, use_umc=use_umc)
     ])
 
     dataset_root = os.path.join('data', 'ModelNet_Robustness')
-    if os.path.exists(dataset_root): shutil.rmtree(dataset_root) # Force fresh start
 
     # Load Datasets
     # We use 'pre_transform=None' and put everything in 'transform'
