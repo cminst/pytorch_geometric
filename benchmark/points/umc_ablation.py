@@ -56,20 +56,25 @@ class ComputeSpectralConfig(BaseTransform):
     def solve_umc(self, phi):
         N, K = phi.shape
         device = phi.device
-        w = torch.ones(N, device=device)
-        w.requires_grad = True
-        optimizer = torch.optim.Adam([w], lr=self.lr)
-        I_K = torch.eye(K, device=device)
 
-        for _ in range(self.steps):
-            optimizer.zero_grad()
-            W_mat = torch.diag(torch.relu(w))
-            gram = phi.T @ W_mat @ phi
-            loss = torch.norm(gram - I_K) ** 2
-            loss.backward()
-            optimizer.step()
-            with torch.no_grad():
-                w.clamp_(min=1e-4)
+        # Detach phi - we don't need gradients w.r.t. eigenvectors
+        phi = phi.detach()
+
+        # Force enable gradients for this optimization, even if called inside torch.no_grad()
+        with torch.enable_grad():
+            w = torch.ones(N, device=device, requires_grad=True)
+            optimizer = torch.optim.Adam([w], lr=self.lr)
+            I_K = torch.eye(K, device=device)
+
+            for _ in range(self.steps):
+                optimizer.zero_grad()
+                W_mat = torch.diag(torch.relu(w))
+                gram = phi.T @ W_mat @ phi
+                loss = torch.norm(gram - I_K) ** 2
+                loss.backward()
+                optimizer.step()
+                with torch.no_grad():
+                    w.clamp_(min=1e-4)
         return w.detach()
 
     def forward(self, data):
