@@ -166,7 +166,7 @@ def run_experiment(use_umc):
         ComputeSpectralConfig(K=K, use_umc=use_umc)
     ])
 
-    dataset_root = os.path.join('data', 'ModelNet_Robustness')
+    dataset_root = os.path.join('..', 'data', 'ModelNet_Robustness')
 
     # Load Datasets
     # We use 'pre_transform=None' and put everything in 'transform'
