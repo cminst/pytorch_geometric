@@ -29,7 +29,7 @@ class BiasedSamplePoints(BaseTransform):
         weights = weights / weights.sum()
 
         # Sample indices
-        choice = torch.multinomial(weights, self.num_points, replacement=True)
+        choice = torch.multinomial(weights, self.num_points, replacement=False)
 
         data.pos = pos[choice]
         data.batch = torch.zeros(self.num_points, dtype=torch.long)
@@ -71,16 +71,19 @@ class ComputeSpectralConfig(BaseTransform):
         return w.detach()
 
     def forward(self, data):
-        # Compute random-walk Laplacian for geometry preservation
-        edge_index, edge_weight = get_laplacian(data.edge_index, normalization='rw', num_nodes=data.num_nodes)
-
-        # Compute symmetric Laplacian for stable eigen-decomposition
-        edge_index_sym, edge_weight_sym = get_laplacian(data.edge_index, normalization='sym', num_nodes=data.num_nodes)
-        L_sym = to_dense_adj(edge_index_sym, edge_attr=edge_weight_sym, max_num_nodes=data.num_nodes).squeeze(0)
+        # Compute the random-walk Laplacian
+        edge_index_rw, edge_weight_rw = get_laplacian(
+            data.edge_index, normalization='rw', num_nodes=data.num_nodes
+        )
+        L_rw = to_dense_adj(
+            edge_index_rw, edge_attr=edge_weight_rw, max_num_nodes=data.num_nodes
+        ).squeeze(0)
 
         try:
-            _, evecs = torch.linalg.eigh(L_sym)
-            phi = evecs[:, :self.K]
+            # Use torch.linalg.eig for non-symmetric matrices
+            eigenvalues, evecs = torch.linalg.eig(L_rw)
+            # The eigenvectors can be complex due to numerical errors, so we take the real part
+            phi = evecs.real[:, :self.K]
         except Exception:
             phi = torch.zeros(data.num_nodes, self.K, device=data.pos.device)
 
