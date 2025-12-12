@@ -2,6 +2,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch_geometric.datasets import ModelNet
+import os
 from torch_geometric.transforms import Compose, SamplePoints, KNNGraph, BaseTransform, NormalizeScale
 from torch_geometric.loader import DataLoader
 from torch_geometric.utils import get_laplacian, to_dense_adj
