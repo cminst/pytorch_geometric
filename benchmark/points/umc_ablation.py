@@ -61,8 +61,8 @@ class ComputeSpectralConfig(BaseTransform):
 
         for _ in range(self.steps):
             optimizer.zero_grad()
-            W_mat = torch.diag(torch.relu(w))
-            gram = phi.T @ W_mat @ phi
+            w_pos = torch.relu(w) # (N,)
+            gram = phi.T @ (phi * w_pos[:, None]) # (K, K)
             loss = torch.norm(gram - I_K) ** 2
             loss.backward()
             optimizer.step()
