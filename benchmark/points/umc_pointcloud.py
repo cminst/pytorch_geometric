@@ -9,6 +9,10 @@ import argparse
 import os
 import shutil
 
+DEFAULT_DATA_ROOT = os.path.abspath(
+    os.path.join(os.path.dirname(os.path.realpath(__file__)), '..', 'data',
+                 'ModelNet'))
+
 class ComputeSpectralConfig(BaseTransform):
     def __init__(self, K=64, use_umc=True, steps=100, lr=0.01):
         self.K = K
@@ -105,13 +109,21 @@ def parse_args():
     parser.add_argument('--epochs', type=int, default=50)
     parser.add_argument('--no_umc', action='store_true', help="Disable UMC (Use uniform weights)")
     parser.add_argument('--use_const_feature', action='store_true', help="Use constant 1s instead of XYZ as input")
+    parser.add_argument(
+        '--dataset_root',
+        type=str,
+        default=DEFAULT_DATA_ROOT,
+        help='Path to the ModelNet root directory (containing raw/processed). '
+        'Defaults to benchmark/data/ModelNet relative to this file.',
+    )
     return parser.parse_args()
 
 def main():
     args = parse_args()
 
     # Force Cleanup
-    processed_dir = os.path.join('data', 'ModelNet', 'ModelNet10', 'processed')
+    dataset_root = os.path.abspath(args.dataset_root)
+    processed_dir = os.path.join(dataset_root, 'processed')
     if os.path.exists(processed_dir):
         shutil.rmtree(processed_dir)
 
@@ -125,7 +137,6 @@ def main():
         ComputeSpectralConfig(K=args.K, use_umc=use_umc)
     ])
 
-    dataset_root = os.path.join('data', 'ModelNet')
     train_dataset = ModelNet(dataset_root, '10', train=True, transform=None, pre_transform=pre_transform)
     test_dataset = ModelNet(dataset_root, '10', train=False, transform=None, pre_transform=pre_transform)
 
