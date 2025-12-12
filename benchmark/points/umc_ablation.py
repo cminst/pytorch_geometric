@@ -205,13 +205,16 @@ def run_experiment(use_umc):
     def evaluate(loader, name):
         correct = 0
         total = 0
-        with torch.no_grad():
-            for data in loader:
-                data = data.to(device)
+        for data in loader:
+            data = data.to(device)
+
+            with torch.no_grad():
                 out = model(data.pos, data.phi, data.umc_weights, data.num_graphs)
-                pred = out.max(1)[1]
-                correct += pred.eq(data.y.squeeze()).sum().item()
-                total += data.num_graphs
+
+            pred = out.max(1)[1]
+            correct += pred.eq(data.y.squeeze()).sum().item()
+            total += data.num_graphs
+
         acc = correct / total
         print(f"--> {name} Accuracy: {acc*100:.2f}%")
         return acc
