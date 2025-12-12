@@ -142,8 +142,7 @@ def parse_args():
 def main():
     args = parse_args()
 
-    # FIX 5: Force Cleanup of old processed data
-    # This prevents the K=128 crash
+    # Force Cleanup of old processed data
     processed_dir = os.path.join('data', 'ModelNet', 'ModelNet10', 'processed')
     if os.path.exists(processed_dir):
         print(f"Cleaning up old cache at {processed_dir}...")
