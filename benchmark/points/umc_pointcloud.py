@@ -2,13 +2,17 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch_geometric.datasets import ModelNet
-import os
 from torch_geometric.transforms import Compose, SamplePoints, KNNGraph, BaseTransform, NormalizeScale
 from torch_geometric.loader import DataLoader
 from torch_geometric.utils import get_laplacian, to_dense_adj
 import argparse
 import os.path as osp
-import shutil # Added for cleanup
+import shutil
+
+
+DEFAULT_MODELNET_ROOT = osp.join(
+    osp.dirname(osp.realpath(__file__)), '..', 'data', 'ModelNet'
+)
 
 # --- 1. The Fixed Transform ---
 class ComputeSpectralConfig(BaseTransform):
@@ -137,14 +141,25 @@ def parse_args():
     parser.add_argument('--batch_size', type=int, default=32)
     parser.add_argument('--lr', type=float, default=0.001)
     parser.add_argument('--epochs', type=int, default=50)
+    parser.add_argument(
+        '--dataset_root',
+        type=str,
+        default=None,
+        help='Where to store/download ModelNet (default: benchmark/data/ModelNet)',
+    )
+    parser.add_argument(
+        '--reset_cache',
+        action='store_true',
+        help='Delete cached processed data before running (forces reprocessing).',
+    )
     return parser.parse_args()
 
 def main():
     args = parse_args()
 
-    # Force Cleanup of old processed data
-    processed_dir = os.path.join('data', 'ModelNet', 'ModelNet10', 'processed')
-    if os.path.exists(processed_dir):
+    dataset_root = args.dataset_root or DEFAULT_MODELNET_ROOT
+    processed_dir = osp.join(dataset_root, 'ModelNet10', 'processed')
+    if args.reset_cache and osp.exists(processed_dir):
         print(f"Cleaning up old cache at {processed_dir}...")
         shutil.rmtree(processed_dir)
 
@@ -157,7 +172,6 @@ def main():
         ComputeSpectralConfig(K=args.K, method='UMC')
     ])
 
-    dataset_root = os.path.join('data', 'ModelNet')
     train_dataset = ModelNet(dataset_root, '10', train=True, transform=None, pre_transform=pre_transform)
     test_dataset = ModelNet(dataset_root, '10', train=False, transform=None, pre_transform=pre_transform)
 
