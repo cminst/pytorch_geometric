@@ -82,7 +82,6 @@ class SpectralProjectionNet(nn.Module):
         self.K = K
 
         # A learnable spectral filter (diagonal)
-        # We process each input channel (x,y,z) independently in frequency domain
         self.spectral_filter = nn.Parameter(torch.ones(1, K, in_channels))
 
         # MLP to classify the spectral features
@@ -104,31 +103,31 @@ class SpectralProjectionNet(nn.Module):
         # phi: (Batch*N, K)
         # w: (Batch*N, )
 
-        # Reshape to (Batch, N, ...)
-        # Assuming fixed N=1024 due to SamplePoints transform
         B = batch_size
         N = x.shape[0] // B
         C = x.shape[1]
 
+        # Reshape
         x = x.view(B, N, C)
         phi = phi.view(B, N, self.K)
         w = w.view(B, N)
 
-        # Create Diagonal Weight Matrix W
-        # We can just broadcast multiply instead of full diag matrix construction
-        # w_x: (B, N, C) weighting the input features
-        w_expanded = w.unsqueeze(-1) # (B, N, 1)
-
-        # 1. Projection: f_hat = Phi^T * (W * x)
-        # (B, K, N) @ (B, N, C) -> (B, K, C)
+        # 1. Apply UMC Weights
+        # w_expanded: (B, N, 1)
+        w_expanded = w.unsqueeze(-1)
         weighted_x = x * w_expanded
+
+        # 2. Spectral Projection: f_hat = Phi^T * (W * x)
+        # (B, K, N) @ (B, N, C) -> (B, K, C)
         f_hat = torch.bmm(phi.transpose(1, 2), weighted_x)
 
-        # 2. Spectral Filtering
-        # Element-wise multiplication in frequency domain
+        # 3. Spectral Filtering
         y = f_hat * self.spectral_filter
 
-        # 3. Flatten and Classify
+        # Take absolute value to avoid sign ambiguity
+        y = torch.abs(y)
+
+        # 4. Flatten and Classify
         y = y.view(B, -1) # (B, K*C)
         return F.log_softmax(self.mlp(y), dim=1)
 
