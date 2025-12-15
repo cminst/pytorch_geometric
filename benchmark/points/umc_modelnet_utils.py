@@ -38,7 +38,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from torch_geometric.data import Data
+from torch_geometric.data import Batch, Data
 from torch_geometric.transforms import BaseTransform
 from torch_geometric.utils import to_dense_adj, degree
 
@@ -46,6 +46,31 @@ try:
     from torch_scatter import scatter_mean
 except Exception:
     scatter_mean = None
+
+
+def get_BN(data: Data) -> tuple[int, int]:
+    """
+    Returns (B, N) for both:
+      - Batch objects (from DataLoader): has num_graphs
+      - Single Data objects: no num_graphs -> treat as B=1
+    """
+    total_nodes = data.num_nodes
+    if total_nodes is None:
+        total_nodes = data.pos.size(0)
+    total_nodes = int(total_nodes)
+
+    B = getattr(data, "num_graphs", 1)
+    B = int(B) if B is not None else 1
+    if B < 1:
+        B = 1
+
+    N = total_nodes // B
+    # If something weird happens, fall back safely:
+    if N * B != total_nodes:
+        B = 1
+        N = total_nodes
+
+    return B, N
 
 
 # ----------------------------
@@ -398,9 +423,8 @@ class NoWeightClassifier(BaseModel):
         x = data.pos if getattr(data, "x", None) is None else data.x
         phi = data.phi
 
-        B = int(data.num_graphs)
-        total_nodes = int(data.num_nodes)
-        N = total_nodes // B
+        B, N = get_BN(data)
+        total_nodes = B * N
 
         w = torch.ones(total_nodes, device=x.device, dtype=x.dtype)
 
@@ -426,9 +450,8 @@ class FixedDegreeClassifier(BaseModel):
         phi = data.phi
         deg = data.deg.to(x.device).to(x.dtype)
 
-        B = int(data.num_graphs)
-        total_nodes = int(data.num_nodes)
-        N = total_nodes // B
+        B, N = get_BN(data)
+        total_nodes = B * N
 
         w = normalize_weights_per_graph(deg, B=B, N=N, eps=self.eps)
 
@@ -454,9 +477,8 @@ class InvDegreeHeuristicClassifier(BaseModel):
         phi = data.phi
         deg = data.deg.to(x.device).to(x.dtype)
 
-        B = int(data.num_graphs)
-        total_nodes = int(data.num_nodes)
-        N = total_nodes // B
+        B, N = get_BN(data)
+        total_nodes = B * N
 
         w = 1.0 / (deg + self.eps)
         w = normalize_weights_per_graph(w, B=B, N=N, eps=self.eps)
@@ -487,9 +509,8 @@ class MeanDistHeuristicClassifier(BaseModel):
         x = data.pos if getattr(data, "x", None) is None else data.x
         phi = data.phi
 
-        B = int(data.num_graphs)
-        total_nodes = int(data.num_nodes)
-        N = total_nodes // B
+        B, N = get_BN(data)
+        total_nodes = B * N
 
         mean_dist, _, _ = density_features(data.pos, data.edge_index, num_nodes=total_nodes)
         w = mean_dist.to(x.dtype)
@@ -552,9 +573,8 @@ class UMCClassifier(BaseModel):
         x = data.pos if getattr(data, "x", None) is None else data.x
         phi = data.phi
 
-        B = int(data.num_graphs)
-        total_nodes = int(data.num_nodes)
-        N = total_nodes // B
+        B, N = get_BN(data)
+        total_nodes = B * N
 
         feat = self._weight_features(data)
         w_pred = self.weight_net(feat, B=B, N=N)
@@ -621,9 +641,8 @@ class ExtraCapacityControl(BaseModel):
         x = data.pos if getattr(data, "x", None) is None else data.x
         phi = data.phi
 
-        B = int(data.num_graphs)
-        total_nodes = int(data.num_nodes)
-        N = total_nodes // B
+        B, N = get_BN(data)
+        total_nodes = B * N
 
         feat = self._weight_features(data)
         w_pred = self.weight_net(feat, B=B, N=N)
@@ -769,9 +788,10 @@ def eval_feature_stability(
     max_items: int = 200,
 ) -> float:
     """
-    Cosine similarity between graph feature vectors y for the same shape under:
+    Cosine similarity between feature vectors y for the same shape under:
       - bias0 resample
       - bias1 resample
+    We wrap each Data into a Batch of size 1 so num_graphs exists.
     """
     model.eval()
     sims = []
@@ -779,15 +799,17 @@ def eval_feature_stability(
 
     for i in range(n):
         base = data_list_dense[i]
+
         d0 = transform_bias0(base.clone())
         d1 = transform_bias1(base.clone())
-        d0 = d0.to(device)
-        d1 = d1.to(device)
+
+        # Wrap to Batch(1)
+        d0 = Batch.from_data_list([d0]).to(device)
+        d1 = Batch.from_data_list([d1]).to(device)
 
         _, _, _, y0 = model(d0, return_features=True)
         _, _, _, y1 = model(d1, return_features=True)
 
-        # y: [B, F], here B=1
         v0 = y0[0]
         v1 = y1[0]
         sim = float(F.cosine_similarity(v0.unsqueeze(0), v1.unsqueeze(0), dim=1).item())
