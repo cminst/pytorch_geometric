@@ -60,15 +60,16 @@ class ComputeSpectralConfig(BaseTransform):
             optimizer = torch.optim.Adam([w], lr=self.lr)
             I_K = torch.eye(K, device=device)
 
-            for _ in range(self.steps):
-                optimizer.zero_grad()
-                W_mat = torch.diag(torch.relu(w))
-                gram = phi.T @ W_mat @ phi
-                loss = torch.norm(gram - I_K) ** 2
-                loss.backward()
-                optimizer.step()
-                with torch.no_grad():
-                    w.clamp_(min=1e-4)
+        for _ in range(self.steps):
+            optimizer.zero_grad()
+            w_pos = torch.relu(w) # (N,)
+            gram = phi.T @ (phi * w_pos[:, None]) # (K, K)
+            loss = torch.norm(gram - I_K) ** 2
+            loss.backward()
+            optimizer.step()
+            with torch.no_grad():
+                w.clamp_(min=1e-4)
+                
         return w.detach()
 
     def forward(self, data):
