@@ -55,35 +55,43 @@ class ComputeSpectralConfig(BaseTransform):
         device = phi.device
         phi = phi.detach()
 
-        w = torch.ones(N, device=device, requires_grad=True)
-        optimizer = torch.optim.Adam([w], lr=self.lr)
-        I_K = torch.eye(K, device=device)
+        with torch.enable_grad():
+            w = torch.ones(N, device=device, requires_grad=True)
+            optimizer = torch.optim.Adam([w], lr=self.lr)
+            I_K = torch.eye(K, device=device)
 
-        for _ in range(self.steps):
-            optimizer.zero_grad()
-            W_mat = torch.diag(torch.relu(w))
-            gram = phi.T @ W_mat @ phi
-            loss = torch.norm(gram - I_K) ** 2
-            loss.backward()
-            optimizer.step()
-            with torch.no_grad():
-                w.clamp_(min=1e-4)
+            for _ in range(self.steps):
+                optimizer.zero_grad()
+                W_mat = torch.diag(torch.relu(w))
+                gram = phi.T @ W_mat @ phi
+                loss = torch.norm(gram - I_K) ** 2
+                loss.backward()
+                optimizer.step()
+                with torch.no_grad():
+                    w.clamp_(min=1e-4)
         return w.detach()
 
     def forward(self, data):
+        use_symmetric = True
+        normalization = 'sym' if use_symmetric else 'rw'
+        eig_func = torch.linalg.eigh if use_symmetric else torch.linalg.eig
+        
         # Compute the random-walk Laplacian
         edge_index_rw, edge_weight_rw = get_laplacian(
-            data.edge_index, normalization='rw', num_nodes=data.num_nodes
+            data.edge_index, normalization=normalization, num_nodes=data.num_nodes
         )
         L_rw = to_dense_adj(
             edge_index_rw, edge_attr=edge_weight_rw, max_num_nodes=data.num_nodes
         ).squeeze(0)
 
         try:
-            # Use torch.linalg.eig for non-symmetric matrices
-            eigenvalues, evecs = torch.linalg.eig(L_rw)
-            # The eigenvectors can be complex due to numerical errors, so we take the real part
-            phi = evecs.real[:, :self.K]
+            eigenvalues, evecs = eig_func(L_rw)
+            evals = eigenvalues.real
+            evecs = evecs.real
+            
+            idx = torch.argsort(evals)       # smallest first
+            phi = evecs[:, idx[:self.K]]
+
         except Exception:
             phi = torch.zeros(data.num_nodes, self.K, device=data.pos.device)
 
