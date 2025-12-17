@@ -115,6 +115,8 @@ def main():
     ap.add_argument("--stability_bias", type=float, default=3.0)
     ap.add_argument("--stability_items", type=int, default=200)
 
+    ap.add_argument("--methods", type=str, default="naive,deg,invdeg,meandist,cap,umc", help="comma-separated methods to run")
+
     args = ap.parse_args()
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -123,6 +125,8 @@ def main():
     seeds = [int(s) for s in args.seeds.split(",") if s.strip() != ""]
     bias_levels = [float(b) for b in args.bias_levels.split(",") if b.strip() != ""]
     lambda_ortho_grid = [float(x) for x in args.lambda_ortho_grid.split(",") if x.strip() != ""]
+
+    methods_to_run = {s.strip() for s in args.methods.split(",") if s.strip()}
 
     num_classes = int(args.name)
 
@@ -222,6 +226,8 @@ def main():
         ("cap", 0.0),
     ]
     umc_variants = [("umc", lam) for lam in lambda_ortho_grid]
+    base_variants = [v for v in base_variants if v[0] in methods_to_run]
+    umc_variants = [v for v in umc_variants if v[0] in methods_to_run]
 
     # ------------------------------------------------------------
     # Protocols: clean vs aug training
