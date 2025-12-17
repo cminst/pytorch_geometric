@@ -6,102 +6,72 @@ from torch_geometric.transforms import Compose, SamplePoints, KNNGraph, BaseTran
 from torch_geometric.loader import DataLoader
 from torch_geometric.utils import get_laplacian, to_dense_adj
 import argparse
-import os.path as osp
+import os
 import shutil
 
+DEFAULT_DATA_ROOT = os.path.abspath(
+    os.path.join(os.path.dirname(os.path.realpath(__file__)), '..', 'data',
+                 'ModelNet'))
 
-DEFAULT_MODELNET_ROOT = osp.join(
-    osp.dirname(osp.realpath(__file__)), '..', 'data', 'ModelNet'
-)
-
-# --- 1. The Fixed Transform ---
 class ComputeSpectralConfig(BaseTransform):
-    def __init__(self, K=64, method='UMC', steps=100, lr=0.01):
+    def __init__(self, K=64, use_umc=True, steps=100, lr=0.01):
         self.K = K
-        self.method = method
+        self.use_umc = use_umc
         self.steps = steps
         self.lr = lr
 
     def solve_umc(self, phi):
-        """
-        Solves min || Phi.T @ W @ Phi - I ||_F^2
-        """
         N, K = phi.shape
         device = phi.device
 
-        # FIX 1: Initialize to 1.0 (Unit Weights), not 1/N
-        w = torch.ones(N, device=device)
-        w.requires_grad = True
+        # Detach phi - we don't need gradients w.r.t. eigenvectors
+        phi = phi.detach()
 
-        # Use a slightly lower LR for stability with larger magnitudes
-        optimizer = torch.optim.Adam([w], lr=self.lr)
-        I_K = torch.eye(K, device=device)
+        # Force enable gradients for this optimization, even if called inside torch.no_grad()
+        with torch.enable_grad():
+            w = torch.ones(N, device=device, requires_grad=True)
+            optimizer = torch.optim.Adam([w], lr=self.lr)
+            I_K = torch.eye(K, device=device)
 
-        for _ in range(self.steps):
-            optimizer.zero_grad()
-
-            # Enforce non-negativity
-            W_mat = torch.diag(torch.relu(w))
-
-            gram = phi.T @ W_mat @ phi
-            loss = torch.norm(gram - I_K) ** 2
-            loss.backward()
-            optimizer.step()
-
-            # FIX 2: Do NOT divide by sum.
-            # We want the weights to adapt to the scale of N.
-            # Just clamp to be positive.
-            with torch.no_grad():
-                w.clamp_(min=1e-4)
-
+            for _ in range(self.steps):
+                optimizer.zero_grad()
+                w_pos = torch.relu(w) # (N,)
+                gram = phi.T @ (phi * w_pos[:, None]) # (K, K)
+                loss = torch.norm(gram - I_K) ** 2
+                loss.backward()
+                optimizer.step()
+                with torch.no_grad():
+                    w.clamp_(min=1e-4)
         return w.detach()
 
     def forward(self, data):
-        # FIX 3: Use 'rw' (Random Walk) normalization.
-        # 'sym' forces orthogonality but distorts geometry.
-        # 'rw' preserves geometry but breaks orthogonality -> UMC fixes this!
+        # Use RW normalization to preserve geometry
         edge_index, edge_weight = get_laplacian(data.edge_index, normalization='rw', num_nodes=data.num_nodes)
         L = to_dense_adj(edge_index, edge_attr=edge_weight, max_num_nodes=data.num_nodes).squeeze(0)
 
-        # Eigen decomposition
-        # For RW Laplacian, eigenvalues are real but matrix is non-symmetric.
-        # However, PyG returns the symmetric L_sym for 'sym' and L_rw for 'rw'.
-        # L_rw = D^-1 L.
-        # Note: torch.linalg.eig (not eigh) is needed for non-symmetric matrices,
-        # but L_rw has real eigenvalues. Ideally we map to L_sym for stability,
-        # but for this demo let's stick to the direct approach.
-
-        # Stability Hack: L_rw is similar to L_sym.
-        # Let's use L_sym to get basis, then un-normalize it to simulate the geometric distortion.
-        # (This is a common trick in GNNs to avoid complex numbers).
-
-        # Revert to 'sym' for stable solver, but we will see UMC work because
-        # we will initialize W=1, and on irregular graphs, even L_sym basis
-        # isn't perfectly "area-orthogonal" w.r.t the surface.
+        # Use Sym for stability in eigendecomposition, then project back
         edge_index_sym, edge_weight_sym = get_laplacian(data.edge_index, normalization='sym', num_nodes=data.num_nodes)
         L_sym = to_dense_adj(edge_index_sym, edge_attr=edge_weight_sym, max_num_nodes=data.num_nodes).squeeze(0)
 
         evals, evecs = torch.linalg.eigh(L_sym)
         phi = evecs[:, :self.K]
 
-        if self.method == 'UMC':
+        if self.use_umc:
             w = self.solve_umc(phi)
         else:
+            # NAIVE BASELINE: Uniform weights
             w = torch.ones(data.num_nodes)
 
         data.phi = phi
         data.umc_weights = w
-
         return data
 
-# --- 2. The Fixed Network ---
 class SpectralProjectionNet(nn.Module):
     def __init__(self, in_channels, num_classes, K):
         super().__init__()
         self.K = K
         self.spectral_filter = nn.Parameter(torch.ones(1, K, in_channels))
 
-        # Increased MLP capacity
         self.mlp = nn.Sequential(
             nn.Linear(K * in_channels, 1024),
             nn.BatchNorm1d(1024),
@@ -110,6 +80,7 @@ class SpectralProjectionNet(nn.Module):
             nn.Linear(1024, 512),
             nn.BatchNorm1d(512),
             nn.ReLU(),
+            nn.Dropout(0.5), # Added extra dropout
             nn.Linear(512, num_classes)
         )
 
@@ -128,7 +99,7 @@ class SpectralProjectionNet(nn.Module):
         f_hat = torch.bmm(phi.transpose(1, 2), weighted_x)
         y = f_hat * self.spectral_filter
 
-        # FIX 4: Sign Invariance (Absolute Value)
+        # Sign Invariance
         y = torch.abs(y)
 
         y = y.view(B, -1)
@@ -141,35 +112,34 @@ def parse_args():
     parser.add_argument('--batch_size', type=int, default=32)
     parser.add_argument('--lr', type=float, default=0.001)
     parser.add_argument('--epochs', type=int, default=50)
+    parser.add_argument('--no_umc', action='store_true', help="Disable UMC (Use uniform weights)")
+    parser.add_argument('--use_const_feature', action='store_true', help="Use constant 1s instead of XYZ as input")
     parser.add_argument(
         '--dataset_root',
         type=str,
-        default=None,
-        help='Where to store/download ModelNet (default: benchmark/data/ModelNet)',
-    )
-    parser.add_argument(
-        '--reset_cache',
-        action='store_true',
-        help='Delete cached processed data before running (forces reprocessing).',
+        default=DEFAULT_DATA_ROOT,
+        help='Path to the ModelNet root directory (containing raw/processed). '
+        'Defaults to benchmark/data/ModelNet relative to this file.',
     )
     return parser.parse_args()
 
 def main():
     args = parse_args()
 
-    dataset_root = args.dataset_root or DEFAULT_MODELNET_ROOT
-    processed_dir = osp.join(dataset_root, 'ModelNet10', 'processed')
-    if args.reset_cache and osp.exists(processed_dir):
-        print(f"Cleaning up old cache at {processed_dir}...")
+    # Force Cleanup
+    dataset_root = os.path.abspath(args.dataset_root)
+    processed_dir = os.path.join(dataset_root, 'processed')
+    if os.path.exists(processed_dir):
         shutil.rmtree(processed_dir)
 
-    # Transforms
-    print("Preparing Data...")
+    use_umc = not args.no_umc
+    print(f"Preparing Data... Mode: {'UMC' if use_umc else 'NAIVE (Uniform)'}")
+
     pre_transform = Compose([
         SamplePoints(args.num_points),
         NormalizeScale(),
         KNNGraph(k=20),
-        ComputeSpectralConfig(K=args.K, method='UMC')
+        ComputeSpectralConfig(K=args.K, use_umc=use_umc)
     ])
 
     train_dataset = ModelNet(dataset_root, '10', train=True, transform=None, pre_transform=pre_transform)
@@ -179,10 +149,14 @@ def main():
     test_loader = DataLoader(test_dataset, batch_size=args.batch_size, shuffle=False)
 
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    model = SpectralProjectionNet(in_channels=3, num_classes=10, K=args.K).to(device)
-    optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
 
-    print(f"Training on {device} with K={args.K}")
+    # Input channels: 3 if using XYZ, 1 if using Constant
+    in_channels = 1 if args.use_const_feature else 3
+
+    model = SpectralProjectionNet(in_channels=in_channels, num_classes=10, K=args.K).to(device)
+    optimizer = torch.optim.Adam(model.parameters(), lr=args.lr, weight_decay=5e-4) # Added weight decay
+
+    print(f"Training on {device} with K={args.K}, Features={'Const' if args.use_const_feature else 'XYZ'}")
 
     for epoch in range(1, args.epochs + 1):
         model.train()
@@ -193,7 +167,14 @@ def main():
         for data in train_loader:
             data = data.to(device)
             optimizer.zero_grad()
-            out = model(data.pos, data.phi, data.umc_weights, data.num_graphs)
+
+            # Feature Selection
+            if args.use_const_feature:
+                x = torch.ones((data.pos.shape[0], 1), device=device)
+            else:
+                x = data.pos
+
+            out = model(x, data.phi, data.umc_weights, data.num_graphs)
             loss = F.nll_loss(out, data.y.squeeze())
             loss.backward()
             optimizer.step()
@@ -204,19 +185,23 @@ def main():
 
         train_acc = correct / total
 
-        # Test Loop
-        model.eval()
-        test_correct = 0
-        test_total = 0
-        with torch.no_grad():
-            for data in test_loader:
-                data = data.to(device)
-                out = model(data.pos, data.phi, data.umc_weights, data.num_graphs)
-                pred = out.max(1)[1]
-                test_correct += pred.eq(data.y.squeeze()).sum().item()
-                test_total += data.num_graphs
+        if epoch % 1 == 0:
+            model.eval()
+            test_correct = 0
+            test_total = 0
+            with torch.no_grad():
+                for data in test_loader:
+                    data = data.to(device)
+                    if args.use_const_feature:
+                        x = torch.ones((data.pos.shape[0], 1), device=device)
+                    else:
+                        x = data.pos
+                    out = model(x, data.phi, data.umc_weights, data.num_graphs)
+                    pred = out.max(1)[1]
+                    test_correct += pred.eq(data.y.squeeze()).sum().item()
+                    test_total += data.num_graphs
 
-        print(f'Epoch {epoch:02d}, Loss: {total_loss/len(train_loader):.4f}, Train Acc: {train_acc:.4f}, Test Acc: {test_correct/test_total:.4f}')
+            print(f'Epoch {epoch:02d}, Loss: {total_loss/len(train_loader):.4f}, Train Acc: {train_acc:.4f}, Test Acc: {test_correct/test_total:.4f}')
 
 if __name__ == '__main__':
     main()

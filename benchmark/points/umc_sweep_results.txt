@@ -1,0 +1,114 @@
+(.venv) zli@eagle2:~/pytorch_geometric/benchmark/points$ python3 run_all_umc_experiments.py 
+Device: cuda
+Loading datasets (may process once on first run)...
+
+=== TRAIN MODE: train_clean ===
+
+
+--- Seed 0 ---
+[train_clean | seed=0 | naive] test_acc=78.85%  stress@4.0=38.22%
+[train_clean | seed=0 | deg] test_acc=80.29%  stress@4.0=37.44%
+[train_clean | seed=0 | invdeg] test_acc=78.96%  stress@4.0=39.10%
+[train_clean | seed=0 | meandist] test_acc=80.07%  stress@4.0=38.66%
+[train_clean | seed=0 | cap] test_acc=79.63%  stress@4.0=39.54%
+[train_clean | seed=0 | UMC lam=0.0] test_acc=85.24%  stress@4.0=44.05%
+[train_clean | seed=0 | UMC lam=0.001] test_acc=86.45%  stress@4.0=46.92%
+[train_clean | seed=0 | UMC lam=0.01] test_acc=86.67%  stress@4.0=47.03%
+[train_clean | seed=0 | UMC lam=0.1] test_acc=84.58%  stress@4.0=46.48%
+[train_clean | seed=0 | UMC lam=1.0] test_acc=84.47%  stress@4.0=43.94%
+[train_clean | seed=0 | UMC lam=10.0] test_acc=84.69%  stress@4.0=39.43%
+
+--- Seed 1 ---
+[train_clean | seed=1 | naive] test_acc=76.98%  stress@4.0=39.43%
+[train_clean | seed=1 | deg] test_acc=80.51%  stress@4.0=41.19%
+[train_clean | seed=1 | invdeg] test_acc=77.75%  stress@4.0=40.09%
+[train_clean | seed=1 | meandist] test_acc=80.62%  stress@4.0=37.00%
+[train_clean | seed=1 | cap] test_acc=80.73%  stress@4.0=40.09%
+[train_clean | seed=1 | UMC lam=0.0] test_acc=84.58%  stress@4.0=41.08%
+[train_clean | seed=1 | UMC lam=0.001] test_acc=84.80%  stress@4.0=46.26%
+[train_clean | seed=1 | UMC lam=0.01] test_acc=84.80%  stress@4.0=43.72%
+[train_clean | seed=1 | UMC lam=0.1] test_acc=85.35%  stress@4.0=42.84%
+[train_clean | seed=1 | UMC lam=1.0] test_acc=83.37%  stress@4.0=44.49%
+[train_clean | seed=1 | UMC lam=10.0] test_acc=82.49%  stress@4.0=42.18%
+
+--- Seed 2 ---
+[train_clean | seed=2 | naive] test_acc=77.86%  stress@4.0=39.32%
+[train_clean | seed=2 | deg] test_acc=80.07%  stress@4.0=40.31%
+[train_clean | seed=2 | invdeg] test_acc=78.85%  stress@4.0=38.22%
+[train_clean | seed=2 | meandist] test_acc=78.08%  stress@4.0=38.99%
+[train_clean | seed=2 | cap] test_acc=78.96%  stress@4.0=34.80%
+[train_clean | seed=2 | UMC lam=0.0] test_acc=82.05%  stress@4.0=39.98%
+[train_clean | seed=2 | UMC lam=0.001] test_acc=85.68%  stress@4.0=49.01%
+[train_clean | seed=2 | UMC lam=0.01] test_acc=84.69%  stress@4.0=44.27%
+[train_clean | seed=2 | UMC lam=0.1] test_acc=85.68%  stress@4.0=42.51%
+[train_clean | seed=2 | UMC lam=1.0] test_acc=83.81%  stress@4.0=42.62%
+[train_clean | seed=2 | UMC lam=10.0] test_acc=83.70%  stress@4.0=43.94%
+
+=== TRAIN MODE: train_aug ===
+
+
+--- Seed 0 ---
+[train_aug | seed=0 | naive] test_acc=75.77%  stress@4.0=54.19%
+[train_aug | seed=0 | deg] test_acc=74.23%  stress@4.0=49.89%
+[train_aug | seed=0 | invdeg] test_acc=76.54%  stress@4.0=55.18%
+[train_aug | seed=0 | meandist] test_acc=76.21%  stress@4.0=59.80%
+[train_aug | seed=0 | cap] test_acc=78.52%  stress@4.0=56.83%
+[train_aug | seed=0 | UMC lam=0.0] test_acc=84.69%  stress@4.0=67.73%
+[train_aug | seed=0 | UMC lam=0.001] test_acc=80.07%  stress@4.0=61.67%
+[train_aug | seed=0 | UMC lam=0.01] test_acc=83.26%  stress@4.0=65.31%
+[train_aug | seed=0 | UMC lam=0.1] test_acc=83.48%  stress@4.0=64.76%
+[train_aug | seed=0 | UMC lam=1.0] test_acc=78.19%  stress@4.0=58.92%
+[train_aug | seed=0 | UMC lam=10.0] test_acc=81.39%  stress@4.0=67.51%
+
+--- Seed 1 ---
+[train_aug | seed=1 | naive] test_acc=78.96%  stress@4.0=53.08%
+[train_aug | seed=1 | deg] test_acc=77.75%  stress@4.0=55.29%
+[train_aug | seed=1 | invdeg] test_acc=76.32%  stress@4.0=52.53%
+[train_aug | seed=1 | meandist] test_acc=76.10%  stress@4.0=56.50%
+[train_aug | seed=1 | cap] test_acc=77.42%  stress@4.0=54.85%
+[train_aug | seed=1 | UMC lam=0.0] test_acc=82.38%  stress@4.0=61.67%
+[train_aug | seed=1 | UMC lam=0.001] test_acc=84.36%  stress@4.0=64.43%
+[train_aug | seed=1 | UMC lam=0.01] test_acc=82.60%  stress@4.0=64.21%
+[train_aug | seed=1 | UMC lam=0.1] test_acc=77.64%  stress@4.0=58.26%
+[train_aug | seed=1 | UMC lam=1.0] test_acc=78.08%  stress@4.0=59.36%
+[train_aug | seed=1 | UMC lam=10.0] test_acc=84.80%  stress@4.0=64.21%
+
+--- Seed 2 ---
+[train_aug | seed=2 | naive] test_acc=73.79%  stress@4.0=56.94%
+[train_aug | seed=2 | deg] test_acc=77.31%  stress@4.0=54.41%
+[train_aug | seed=2 | invdeg] test_acc=73.90%  stress@4.0=52.53%
+[train_aug | seed=2 | meandist] test_acc=76.54%  stress@4.0=59.80%
+[train_aug | seed=2 | cap] test_acc=74.12%  stress@4.0=52.97%
+[train_aug | seed=2 | UMC lam=0.0] test_acc=84.36%  stress@4.0=68.83%
+[train_aug | seed=2 | UMC lam=0.001] test_acc=82.38%  stress@4.0=65.42%
+[train_aug | seed=2 | UMC lam=0.01] test_acc=77.86%  stress@4.0=60.57%
+[train_aug | seed=2 | UMC lam=0.1] test_acc=84.03%  stress@4.0=64.43%
+[train_aug | seed=2 | UMC lam=1.0] test_acc=77.97%  stress@4.0=63.33%
+[train_aug | seed=2 | UMC lam=10.0] test_acc=84.69%  stress@4.0=65.31%
+
+Saved: umc_sweep_results.csv
+
+=== Summary (mean±std over seeds) ===
+ train_mode  variant  lambda_ortho  test_acc_mean  test_acc_std  stress_max_mean  stress_max_std  stab_mean  stab_std
+  train_aug      cap         0.000      76.688693      2.292584        54.882526        1.927575   0.977880  0.001072
+  train_aug      deg         0.000      76.431718      1.920220        53.193833        2.895031   0.735516  0.003330
+  train_aug   invdeg         0.000      75.587372      1.466592        53.414097        1.526036   0.732002  0.005316
+  train_aug meandist         0.000      76.284875      0.229258        58.700441        1.907545   0.710242  0.005524
+  train_aug    naive         0.000      76.174743      2.611626        54.735683        1.985436   0.734708  0.005599
+  train_aug      umc         0.000      83.810573      1.250861        66.079295        3.854626   0.742143  0.018753
+  train_aug      umc         0.001      82.268722      2.149694        63.839941        1.940119   0.731725  0.001328
+  train_aug      umc         0.010      81.240822      2.943504        63.362702        2.478178   0.724224  0.005465
+  train_aug      umc         0.100      81.718062      3.539683        62.481645        3.659858   0.731932  0.015497
+  train_aug      umc         1.000      78.083700      0.110132        60.535977        2.426243   0.715914  0.003829
+  train_aug      umc        10.000      83.627019      1.940119        65.675477        1.682297   0.744430  0.007558
+train_clean      cap         0.000      79.772394      0.890188        38.142438        2.906182   0.979756  0.003217
+train_clean      deg         0.000      80.286344      0.220264        39.647577        1.957752   0.733902  0.006284
+train_clean   invdeg         0.000      78.524229      0.669908        39.133627        0.936663   0.730967  0.004959
+train_clean meandist         0.000      79.588840      1.332250        38.215859        1.062076   0.689626  0.005978
+train_clean    naive         0.000      77.900147      0.936663        38.986784        0.669908   0.733158  0.003380
+train_clean      umc         0.000      83.957416      1.685898        41.703377        2.107911   0.742020  0.005982
+train_clean      umc         0.001      85.646109      0.826603        47.393539        1.437355   0.752675  0.008549
+train_clean      umc         0.010      85.389134      1.114096        45.007342        1.770127   0.741419  0.008506
+train_clean      umc         0.100      85.205580      0.565154        43.942731        2.199888   0.740770  0.001803
+train_clean      umc         1.000      83.883994      0.554320        43.685756        0.962213   0.740073  0.003182
+train_clean      umc        10.000      83.627019      1.103156        41.850220        2.275769   0.738447  0.000819
