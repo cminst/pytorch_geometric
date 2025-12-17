@@ -1,6 +1,6 @@
 """
 Utilities + models for:
-- spectral projection classifier on ModelNet{10,40}
+- spectral projection classifier on ModelNet{10,40} and ShapeNet
 - fixed / heuristic / learned quadrature weights
 - orthogonality/conditioning regularizer (corr-normalized Gram)
 - robustness stress test under IrregularResample bias
@@ -99,6 +99,22 @@ class MakeUndirected(BaseTransform):
     def forward(self, data: Data) -> Data:
         ei = data.edge_index
         data.edge_index = torch.cat([ei, ei.flip(0)], dim=1)
+        return data
+
+
+class CopyCategoryToY(BaseTransform):
+    """
+    For ShapeNet: copy the 'category' field to 'y' for consistent label access.
+
+    ShapeNet stores shape category in data.category (shape [1]) and per-point
+    segmentation labels in data.y. For classification tasks, we want data.y
+    to be the category label.
+
+    This transform is idempotent - safe to apply multiple times.
+    """
+    def forward(self, data: Data) -> Data:
+        if hasattr(data, 'category') and data.category is not None:
+            data.y = data.category.clone()
         return data
 
 

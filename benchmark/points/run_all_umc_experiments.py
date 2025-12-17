@@ -3,9 +3,10 @@ import time
 import copy
 import argparse
 import pandas as pd
+from typing import Optional, Callable
 
 import torch
-from torch_geometric.datasets import ModelNet
+from torch_geometric.datasets import ModelNet, ShapeNet
 from torch_geometric.loader import DataLoader
 from torch_geometric.transforms import Compose, SamplePoints, NormalizeScale, KNNGraph
 from torch.utils.data import Subset
@@ -13,6 +14,7 @@ from torch.utils.data import Subset
 from umc_modelnet_utils import (
     seed_everything,
     MakeUndirected,
+    CopyCategoryToY,
     IrregularResample,
     RandomIrregularResample,
     ComputePhiRWFromSym,
@@ -29,6 +31,176 @@ from umc_modelnet_utils import (
     ExtraCapacityControl,
 )
 
+
+# ----------------------------
+# Dataset Registry
+# ----------------------------
+
+DATASET_INFO = {
+    "ModelNet10": {
+        "num_classes": 10,
+        "needs_category_to_y": False,
+    },
+    "ModelNet40": {
+        "num_classes": 40,
+        "needs_category_to_y": False,
+    },
+    "ShapeNet": {
+        "num_classes": 16,  # 16 shape categories
+        "needs_category_to_y": True,
+    },
+}
+
+
+def load_dataset(
+    name: str,
+    root: str,
+    train: bool,
+    pre_transform: Optional[Callable],
+    transform: Optional[Callable],
+    force_reload: bool = False,
+):
+    """
+    Load a dataset by name.
+
+    Args:
+        name: One of 'ModelNet10', 'ModelNet40', 'ShapeNet'
+        root: Root directory for data
+        train: If True, load training split; else test split
+        pre_transform: Pre-transform to apply (cached)
+        transform: Transform to apply on access
+        force_reload: Whether to reprocess the dataset
+
+    Returns:
+        Dataset instance
+    """
+    if name == "ModelNet10":
+        return ModelNet(
+            root=root,
+            name="10",
+            train=train,
+            pre_transform=pre_transform,
+            transform=transform,
+            force_reload=force_reload,
+        )
+    elif name == "ModelNet40":
+        return ModelNet(
+            root=root,
+            name="40",
+            train=train,
+            pre_transform=pre_transform,
+            transform=transform,
+            force_reload=force_reload,
+        )
+    elif name == "ShapeNet":
+        # ShapeNet uses split='trainval'/'test' instead of train=True/False
+        split = "trainval" if train else "test"
+        return ShapeNet(
+            root=root,
+            categories=None,  # Load all categories
+            include_normals=False,  # We only use positions
+            split=split,
+            pre_transform=pre_transform,
+            transform=transform,
+            force_reload=force_reload,
+        )
+    else:
+        raise ValueError(f"Unknown dataset: {name}. Supported: {list(DATASET_INFO.keys())}")
+
+
+def build_pre_transform(dense_points: int, needs_category_to_y: bool) -> Compose:
+    """Build pre_transform pipeline (applied once and cached)."""
+    transforms = [
+        SamplePoints(dense_points),
+        NormalizeScale(),
+    ]
+    if needs_category_to_y:
+        transforms.append(CopyCategoryToY())
+    return Compose(transforms)
+
+
+def build_train_transform_clean(
+    num_points: int,
+    knn_k: int,
+    K: int,
+    needs_category_to_y: bool,
+) -> Compose:
+    """Build clean (uniform) training transform."""
+    transforms = [
+        IrregularResample(num_points=num_points, bias_strength=0.0),
+        NormalizeScale(),
+        KNNGraph(k=knn_k),
+        MakeUndirected(),
+        ComputePhiRWFromSym(K=K, store_aux=True),
+    ]
+    if needs_category_to_y:
+        transforms.append(CopyCategoryToY())
+    return Compose(transforms)
+
+
+def build_train_transform_aug(
+    num_points: int,
+    knn_k: int,
+    K: int,
+    max_bias: float,
+    needs_category_to_y: bool,
+) -> Compose:
+    """Build augmented (random bias) training transform."""
+    transforms = [
+        RandomIrregularResample(num_points=num_points, max_bias=max_bias),
+        NormalizeScale(),
+        KNNGraph(k=knn_k),
+        MakeUndirected(),
+        ComputePhiRWFromSym(K=K, store_aux=True),
+    ]
+    if needs_category_to_y:
+        transforms.append(CopyCategoryToY())
+    return Compose(transforms)
+
+
+def build_test_transform_clean(
+    num_points: int,
+    knn_k: int,
+    K: int,
+    needs_category_to_y: bool,
+) -> Compose:
+    """Build clean (uniform) test transform."""
+    transforms = [
+        IrregularResample(num_points=num_points, bias_strength=0.0),
+        NormalizeScale(),
+        KNNGraph(k=knn_k),
+        MakeUndirected(),
+        ComputePhiRWFromSym(K=K, store_aux=True),
+    ]
+    if needs_category_to_y:
+        transforms.append(CopyCategoryToY())
+    return Compose(transforms)
+
+
+def build_stress_transform(
+    num_points: int,
+    knn_k: int,
+    K: int,
+    bias_strength: float,
+    needs_category_to_y: bool,
+) -> Compose:
+    """Build stress test transform with specific bias level."""
+    transforms = [
+        IrregularResample(num_points=num_points, bias_strength=bias_strength),
+        NormalizeScale(),
+        KNNGraph(k=knn_k),
+        MakeUndirected(),
+        ComputePhiRWFromSym(K=K, store_aux=True),
+    ]
+    if needs_category_to_y:
+        transforms.append(CopyCategoryToY())
+    return Compose(transforms)
+
+
+# ----------------------------
+# Helper Functions
+# ----------------------------
+
 def split_train_val(ds, val_ratio: float, seed: int):
     n = len(ds)
     n_val = int(round(n * val_ratio))
@@ -37,6 +209,7 @@ def split_train_val(ds, val_ratio: float, seed: int):
     train_idx = idx[n_val:]
     return Subset(ds, train_idx), Subset(ds, val_idx)
 
+
 def make_loaders(train_ds, val_ds, test_ds, batch_size: int, seed: int, drop_last_train: bool = True):
     g = torch.Generator().manual_seed(seed)
     train_loader = DataLoader(train_ds, batch_size=batch_size, shuffle=True, drop_last=drop_last_train, generator=g, num_workers=0)
@@ -44,12 +217,13 @@ def make_loaders(train_ds, val_ds, test_ds, batch_size: int, seed: int, drop_las
     test_loader  = DataLoader(test_ds,  batch_size=batch_size, shuffle=False, drop_last=False, num_workers=0)
     return train_loader, val_loader, test_loader
 
+
 @torch.no_grad()
 def eval_stress_table(
     model,
+    dataset_name: str,
     root: str,
-    name: str,
-    pre_transform_dense,
+    pre_transform,
     bias_levels,
     num_points: int,
     knn_k: int,
@@ -57,6 +231,7 @@ def eval_stress_table(
     device,
     batch_size: int,
     seed: int,
+    needs_category_to_y: bool,
 ):
     """
     Evaluate accuracy across bias levels with deterministic corruption per (seed, bias).
@@ -66,19 +241,19 @@ def eval_stress_table(
         # deterministic per bias so all models see the "same" stress corruption
         seed_everything(seed + int(1000 * bias))
 
-        stress_transform = Compose([
-            IrregularResample(num_points=num_points, bias_strength=float(bias)),
-            NormalizeScale(),
-            KNNGraph(k=knn_k),
-            MakeUndirected(),
-            ComputePhiRWFromSym(K=K, store_aux=True),
-        ])
+        stress_transform = build_stress_transform(
+            num_points=num_points,
+            knn_k=knn_k,
+            K=K,
+            bias_strength=float(bias),
+            needs_category_to_y=needs_category_to_y,
+        )
 
-        ds = ModelNet(
+        ds = load_dataset(
+            name=dataset_name,
             root=root,
-            name=str(name),
             train=False,
-            pre_transform=pre_transform_dense,
+            pre_transform=pre_transform,
             transform=stress_transform,
             force_reload=False,
         )
@@ -90,8 +265,10 @@ def eval_stress_table(
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--root", type=str, default="../data/ModelNet_UMC")
-    ap.add_argument("--name", type=str, default="10", help="ModelNet class count: '10' or '40'")
+    ap.add_argument("--root", type=str, default="../data/PointCloud_UMC")
+    ap.add_argument("--dataset", type=str, default="ModelNet10",
+                    choices=list(DATASET_INFO.keys()),
+                    help="Dataset: ModelNet10, ModelNet40, or ShapeNet")
     ap.add_argument("--num_points", type=int, default=512)
     ap.add_argument("--dense_points", type=int, default=2048)
     ap.add_argument("--K", type=int, default=64)
@@ -121,6 +298,15 @@ def main():
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print("Device:", device)
+    print("Dataset:", args.dataset)
+
+    # Get dataset info
+    dataset_info = DATASET_INFO[args.dataset]
+    num_classes = dataset_info["num_classes"]
+    needs_category_to_y = dataset_info["needs_category_to_y"]
+
+    print(f"  num_classes: {num_classes}")
+    print(f"  needs_category_to_y: {needs_category_to_y}")
 
     seeds = [int(s) for s in args.seeds.split(",") if s.strip() != ""]
     bias_levels = [float(b) for b in args.bias_levels.split(",") if b.strip() != ""]
@@ -128,71 +314,67 @@ def main():
 
     methods_to_run = {s.strip() for s in args.methods.split(",") if s.strip()}
 
-    num_classes = int(args.name)
-
     # ------------------------------------------------------------
     # Pre-transform: cache a dense (aligned) point set once.
     # ------------------------------------------------------------
-    pre_transform_dense = Compose([
-        SamplePoints(args.dense_points),
-        NormalizeScale(),
-    ])
+    pre_transform_dense = build_pre_transform(
+        dense_points=args.dense_points,
+        needs_category_to_y=needs_category_to_y,
+    )
 
     # ------------------------------------------------------------
     # Build transform pipelines
     # ------------------------------------------------------------
     # TRAIN: clean (uniform) or augmented (random bias)
-    train_transform_clean = Compose([
-        IrregularResample(num_points=args.num_points, bias_strength=0.0),
-        NormalizeScale(),
-        KNNGraph(k=args.knn_k),
-        MakeUndirected(),
-        ComputePhiRWFromSym(K=args.K, store_aux=True),
-    ])
+    train_transform_clean = build_train_transform_clean(
+        num_points=args.num_points,
+        knn_k=args.knn_k,
+        K=args.K,
+        needs_category_to_y=needs_category_to_y,
+    )
 
-    train_transform_aug = Compose([
-        RandomIrregularResample(num_points=args.num_points, max_bias=args.max_bias_train),
-        NormalizeScale(),
-        KNNGraph(k=args.knn_k),
-        MakeUndirected(),
-        ComputePhiRWFromSym(K=args.K, store_aux=True),
-    ])
+    train_transform_aug = build_train_transform_aug(
+        num_points=args.num_points,
+        knn_k=args.knn_k,
+        K=args.K,
+        max_bias=args.max_bias_train,
+        needs_category_to_y=needs_category_to_y,
+    )
 
     # TEST: clean (uniform)
-    test_transform_clean = Compose([
-        IrregularResample(num_points=args.num_points, bias_strength=0.0),
-        NormalizeScale(),
-        KNNGraph(k=args.knn_k),
-        MakeUndirected(),
-        ComputePhiRWFromSym(K=args.K, store_aux=True),
-    ])
+    test_transform_clean = build_test_transform_clean(
+        num_points=args.num_points,
+        knn_k=args.knn_k,
+        K=args.K,
+        needs_category_to_y=needs_category_to_y,
+    )
+
+    # Bias transforms for stability test
+    transform_bias0 = build_stress_transform(
+        num_points=args.num_points,
+        knn_k=args.knn_k,
+        K=args.K,
+        bias_strength=0.0,
+        needs_category_to_y=needs_category_to_y,
+    )
+    transform_biasS = build_stress_transform(
+        num_points=args.num_points,
+        knn_k=args.knn_k,
+        K=args.K,
+        bias_strength=float(args.stability_bias),
+        needs_category_to_y=needs_category_to_y,
+    )
 
     # Also keep a "dense raw" test set for stability analysis (no transform here)
     print("Loading datasets (may process once on first run)...")
-    test_dense_ds = ModelNet(
+    test_dense_ds = load_dataset(
+        name=args.dataset,
         root=args.root,
-        name=str(args.name),
         train=False,
         pre_transform=pre_transform_dense,
         transform=None,
         force_reload=False,
     )
-
-    # Bias transforms for stability test applied manually on dense items
-    transform_bias0 = Compose([
-        IrregularResample(num_points=args.num_points, bias_strength=0.0),
-        NormalizeScale(),
-        KNNGraph(k=args.knn_k),
-        MakeUndirected(),
-        ComputePhiRWFromSym(K=args.K, store_aux=True),
-    ])
-    transform_biasS = Compose([
-        IrregularResample(num_points=args.num_points, bias_strength=float(args.stability_bias)),
-        NormalizeScale(),
-        KNNGraph(k=args.knn_k),
-        MakeUndirected(),
-        ComputePhiRWFromSym(K=args.K, store_aux=True),
-    ])
 
     # ------------------------------------------------------------
     # Experiment specs
@@ -244,17 +426,17 @@ def main():
         print("\n=== TRAIN MODE:", mode_name, "===\n")
 
         # Build the dataset objects for this mode
-        train_ds_full = ModelNet(
+        train_ds_full = load_dataset(
+            name=args.dataset,
             root=args.root,
-            name=str(args.name),
             train=True,
             pre_transform=pre_transform_dense,
             transform=train_transform,
             force_reload=False,
         )
-        test_ds = ModelNet(
+        test_ds = load_dataset(
+            name=args.dataset,
             root=args.root,
-            name=str(args.name),
             train=False,
             pre_transform=pre_transform_dense,
             transform=test_transform_clean,
@@ -289,9 +471,9 @@ def main():
                 # stress
                 stress = eval_stress_table(
                     model=model,
+                    dataset_name=args.dataset,
                     root=args.root,
-                    name=args.name,
-                    pre_transform_dense=pre_transform_dense,
+                    pre_transform=pre_transform_dense,
                     bias_levels=bias_levels,
                     num_points=args.num_points,
                     knn_k=args.knn_k,
@@ -299,6 +481,7 @@ def main():
                     device=device,
                     batch_size=args.batch_size,
                     seed=seed,
+                    needs_category_to_y=needs_category_to_y,
                 )
 
                 # correlations (for all; meaningful mainly for learned models)
@@ -317,6 +500,7 @@ def main():
                 )
 
                 row = {
+                    "dataset": args.dataset,
                     "train_mode": mode_name,
                     "seed": seed,
                     "variant": tag,
@@ -349,9 +533,9 @@ def main():
 
                 stress = eval_stress_table(
                     model=model,
+                    dataset_name=args.dataset,
                     root=args.root,
-                    name=args.name,
-                    pre_transform_dense=pre_transform_dense,
+                    pre_transform=pre_transform_dense,
                     bias_levels=bias_levels,
                     num_points=args.num_points,
                     knn_k=args.knn_k,
@@ -359,6 +543,7 @@ def main():
                     device=device,
                     batch_size=args.batch_size,
                     seed=seed,
+                    needs_category_to_y=needs_category_to_y,
                 )
 
                 corr_loader = DataLoader(test_ds, batch_size=args.batch_size, shuffle=False, drop_last=False, num_workers=0)
@@ -375,6 +560,7 @@ def main():
                 )
 
                 row = {
+                    "dataset": args.dataset,
                     "train_mode": mode_name,
                     "seed": seed,
                     "variant": f"umc",
@@ -396,8 +582,8 @@ def main():
     df.to_csv(args.results_csv, index=False)
     print("\nSaved:", args.results_csv)
 
-    # Print a quick mean±std summary over seeds per (train_mode, variant, lambda_ortho)
-    group_cols = ["train_mode", "variant", "lambda_ortho"]
+    # Print a quick mean±std summary over seeds per (dataset, train_mode, variant, lambda_ortho)
+    group_cols = ["dataset", "train_mode", "variant", "lambda_ortho"]
     summary = df.groupby(group_cols).agg(
         test_acc_mean=("test_acc", "mean"),
         test_acc_std=("test_acc", "std"),
@@ -414,7 +600,7 @@ def main():
     summary["stress_max_std"] *= 100
 
     print("\n=== Summary (mean±std over seeds) ===")
-    print(summary.sort_values(["train_mode", "variant", "lambda_ortho"]).to_string(index=False))
+    print(summary.sort_values(["dataset", "train_mode", "variant", "lambda_ortho"]).to_string(index=False))
 
 
 if __name__ == "__main__":
