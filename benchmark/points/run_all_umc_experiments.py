@@ -497,9 +497,10 @@ def main():
             train_ds, val_ds = split_train_val(train_ds_full, val_ratio=args.val_ratio, seed=seed)
 
             if args.cache_eval:
-                print("  Caching val/test once to reuse graph preprocessing...", flush=True)
+                print("Caching val/test once to reuse graph preprocessing...", flush=True)
                 val_ds_eff = cache_dataset(val_ds, num_workers=args.num_workers)
                 test_ds_eff = cache_dataset(test_ds, num_workers=args.num_workers)
+                print("Caching val/test done!", flush=True)
             else:
                 val_ds_eff = val_ds
                 test_ds_eff = test_ds
