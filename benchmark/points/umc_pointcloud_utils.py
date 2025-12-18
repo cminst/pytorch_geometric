@@ -1,12 +1,11 @@
-"""
-Utilities + models for:
+"""Utilities + models for:
 - spectral projection classifier on ModelNet{10,40} and ShapeNet
 - fixed / heuristic / learned quadrature weights
 - orthogonality/conditioning regularizer (corr-normalized Gram)
 - robustness stress test under IrregularResample bias
-- capacity-matched control (same weight MLP, but not used as weights)
+- capacity-matched control (same weight MLP, but not used as weights).
 
-Key design choices:
+Design choices:
 1) Basis:
    Compute U from L_sym = I - D^{-1/2} A D^{-1/2} via eigh
    Define phi = D^{-1/2} U  so phi^T D phi = I (degree-orthonormal)
@@ -27,20 +26,19 @@ Key design choices:
 """
 
 from __future__ import annotations
-from dataclasses import dataclass
-from typing import Dict, Any, Tuple, Optional, List
 
 import math
 import random
-import numpy as np
+from dataclasses import dataclass
+from typing import Any, Dict, List, Optional, Tuple
 
+import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-
 from torch_geometric.data import Batch, Data
 from torch_geometric.transforms import BaseTransform
-from torch_geometric.utils import to_dense_adj, degree
+from torch_geometric.utils import degree, to_dense_adj
 
 try:
     from torch_scatter import scatter_mean
@@ -49,10 +47,9 @@ except Exception:
 
 
 def get_BN(data: Data) -> tuple[int, int]:
-    """
-    Returns (B, N) for both:
-      - Batch objects (from DataLoader): has num_graphs
-      - Single Data objects: no num_graphs -> treat as B=1
+    """Returns (B, N) for both:
+    - Batch objects (from DataLoader): has num_graphs
+    - Single Data objects: no num_graphs -> treat as B=1.
     """
     total_nodes = data.num_nodes
     if total_nodes is None:
@@ -103,8 +100,7 @@ class MakeUndirected(BaseTransform):
 
 
 class CopyCategoryToY(BaseTransform):
-    """
-    For ShapeNet: copy the 'category' field to 'y' for consistent label access.
+    """For ShapeNet: copy the 'category' field to 'y' for consistent label access.
 
     ShapeNet stores shape category in data.category (shape [1]) and per-point
     segmentation labels in data.y. For classification tasks, we want data.y
@@ -119,8 +115,7 @@ class CopyCategoryToY(BaseTransform):
 
 
 class IrregularResample(BaseTransform):
-    """
-    Resample points with optional exponential bias along a random focus direction.
+    """Resample points with optional exponential bias along a random focus direction.
 
     - bias_strength = 0 => uniform downsample/upsample to num_points
     - bias_strength > 0 => sample without replacement using softmax weights exp(bias * proj)
@@ -174,8 +169,7 @@ class RandomIrregularResample(BaseTransform):
 
 
 class ComputePhiRWFromSym(BaseTransform):
-    """
-    Compute phi = D^{-1/2} U where U are eigenvectors of L_sym.
+    """Compute phi = D^{-1/2} U where U are eigenvectors of L_sym.
 
     A is built from edge_index -> dense adjacency (binarized), diag=0.
     deg is computed from A (consistent with phi construction) and stored in data.deg.
@@ -220,9 +214,7 @@ def _batched_view(x: torch.Tensor, B: int, N: int) -> torch.Tensor:
     return x.view(B, N, *x.shape[1:])
 
 def normalize_weights_per_graph(w: torch.Tensor, B: int, N: int, eps: float = 1e-12) -> torch.Tensor:
-    """
-    Normalize weights so mean(w)=1 per graph.
-    """
+    """Normalize weights so mean(w)=1 per graph."""
     wb = w.view(B, N)
     wb = wb * (float(N) / (wb.sum(dim=1, keepdim=True) + eps))
     return wb.view(B * N)
@@ -257,10 +249,9 @@ def batch_weight_stats(w: torch.Tensor, B: int, N: int, eps: float = 1e-12) -> D
     }
 
 def _normalize_gram_corr(gram: torch.Tensor, eps: float = 1e-12) -> torch.Tensor:
-    """
-    gram: [B,K,K]
+    """gram: [B,K,K]
     corr normalize:
-      C_ij = G_ij / sqrt(G_ii G_jj)
+      C_ij = G_ij / sqrt(G_ii G_jj).
     """
     d = torch.diagonal(gram, dim1=1, dim2=2).clamp_min(eps)      # [B,K]
     denom = torch.sqrt(d.unsqueeze(2) * d.unsqueeze(1) + eps)     # [B,K,K]
@@ -275,8 +266,7 @@ def orthogonality_loss_corr(
     eps: float = 1e-12,
     normalize: bool = True,
 ) -> torch.Tensor:
-    """
-    L = mean ||C - I||_F^2 where C is corr-normalized Phi^T diag(w) Phi.
+    """L = mean ||C - I||_F^2 where C is corr-normalized Phi^T diag(w) Phi.
     With corr norm, diagonal is ~1 automatically, so this is effectively off-diagonal energy.
     """
     phi_b = phi.view(B, N, K)
@@ -294,8 +284,7 @@ def orthogonality_loss_corr(
 
 
 def corr_gram_error_single(phi: torch.Tensor, w: torch.Tensor, eps: float = 1e-12) -> torch.Tensor:
-    """
-    Single-graph corr Gram error ||C - I||_F^2 (not normalized).
+    """Single-graph corr Gram error ||C - I||_F^2 (not normalized).
     phi: [N,K], w: [N]
     """
     K = phi.shape[1]
@@ -311,11 +300,10 @@ def corr_gram_error_single(phi: torch.Tensor, w: torch.Tensor, eps: float = 1e-1
 # ----------------------------
 
 def density_features(pos: torch.Tensor, edge_index: torch.Tensor, num_nodes: int) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-    """
-    Returns:
+    """Returns:
       mean_dist: [num_nodes]
       log_mean_dist: [num_nodes]
-      log_deg: [num_nodes]
+      log_deg: [num_nodes].
 
     Requires torch_scatter.
     """
@@ -338,9 +326,7 @@ def density_features(pos: torch.Tensor, edge_index: torch.Tensor, num_nodes: int
 # ----------------------------
 
 class WeightEstimator(nn.Module):
-    """
-    Predict per-point positive weights with per-graph normalization mean(w)=1.
-    """
+    """Predict per-point positive weights with per-graph normalization mean(w)=1."""
     def __init__(self, in_dim: int, hidden: Tuple[int, int] = (128, 64), eps: float = 1e-6):
         super().__init__()
         self.eps = float(eps)
@@ -364,9 +350,8 @@ class WeightEstimator(nn.Module):
 
 
 class SpectralHead(nn.Module):
-    """
-    Core spectral projection head:
-      project -> filter -> abs -> flatten -> MLP -> log_softmax
+    """Core spectral projection head:
+      project -> filter -> abs -> flatten -> MLP -> log_softmax.
 
     Provides feature extraction for stability analysis.
     """
@@ -390,11 +375,10 @@ class SpectralHead(nn.Module):
         )
 
     def project(self, x: torch.Tensor, phi: torch.Tensor, w: torch.Tensor, B: int) -> torch.Tensor:
-        """
-        x:   [B*N, C]
+        """x:   [B*N, C]
         phi: [B*N, K]
         w:   [B*N]
-        returns f_hat: [B, K, C]
+        returns f_hat: [B, K, C].
         """
         C = x.shape[1]
         N = x.shape[0] // B
@@ -407,9 +391,7 @@ class SpectralHead(nn.Module):
         return f_hat
 
     def features_from_fhat(self, f_hat: torch.Tensor) -> torch.Tensor:
-        """
-        f_hat: [B,K,C] -> y: [B, K*C]
-        """
+        """f_hat: [B,K,C] -> y: [B, K*C]."""
         y = torch.abs(f_hat * self.spectral_filter)
         return y.reshape(y.shape[0], -1)
 
@@ -510,9 +492,7 @@ class InvDegreeHeuristicClassifier(BaseModel):
 
 
 class MeanDistHeuristicClassifier(BaseModel):
-    """
-    Heuristic: w ∝ mean_kNN_distance (bigger in sparse regions, smaller in dense clusters)
-    """
+    """Heuristic: w ∝ mean_kNN_distance (bigger in sparse regions, smaller in dense clusters)."""
     def __init__(self, K: int, num_classes: int, in_channels: int = 3, eps: float = 1e-12):
         super().__init__()
         if scatter_mean is None:
@@ -543,9 +523,7 @@ class MeanDistHeuristicClassifier(BaseModel):
 
 
 class UMCClassifier(BaseModel):
-    """
-    Learned weights w_pred used as quadrature weights in projection: f_hat = phi^T (w_pred ⊙ x)
-    """
+    """Learned weights w_pred used as quadrature weights in projection: f_hat = phi^T (w_pred ⊙ x)."""
     def __init__(
         self,
         K: int,
@@ -606,14 +584,13 @@ class UMCClassifier(BaseModel):
 
 
 class ExtraCapacityControl(BaseModel):
-    """
-    Capacity-matched control:
+    """Capacity-matched control:
       - same weight_net produces w_pred
       - projection uses w=1 (NO quadrature weighting)
       - we still let w_pred influence representation by projecting it as a signal:
           g_hat = phi^T (w_pred)
         then:
-          f_hat' = f_hat + g_hat (broadcast over channels)
+          f_hat' = f_hat + g_hat (broadcast over channels).
 
     This keeps the same weight_net parameters but removes "importance weighting" mechanism.
     """
@@ -747,8 +724,7 @@ def eval_weight_correlations(
     device: torch.device,
     max_batches: int = 20,
 ) -> Dict[str, float]:
-    """
-    Average Pearson correlations between predicted/fixed w and density proxies.
+    """Average Pearson correlations between predicted/fixed w and density proxies.
     Works for all models; for fixed-weight baselines it will show near-constant values.
     """
     if scatter_mean is None:
@@ -803,8 +779,7 @@ def eval_feature_stability(
     device: torch.device,
     max_items: int = 200,
 ) -> float:
-    """
-    Cosine similarity between feature vectors y for the same shape under:
+    """Cosine similarity between feature vectors y for the same shape under:
       - bias0 resample
       - bias1 resample
     We wrap each Data into a Batch of size 1 so num_graphs exists.
@@ -854,9 +829,7 @@ def train_model(
     K: int,
     cfg: TrainConfig,
 ) -> Dict[str, Any]:
-    """
-    Train with validation selection (best val acc). Returns final test metrics + best checkpoint stats.
-    """
+    """Train with validation selection (best val acc). Returns final test metrics + best checkpoint stats."""
     opt = torch.optim.Adam(model.parameters(), lr=cfg.lr, weight_decay=cfg.weight_decay)
 
     best_val = -1.0

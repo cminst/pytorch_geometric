@@ -1,22 +1,22 @@
+import os
+import random
+import resource
+import shutil
+import subprocess
+import time
+
+import requests
 from burla import remote_parallel_map
 from rich import print as rich_print
 from rich.panel import Panel
-import os
-import time
-import random
-import subprocess
-import requests
-import shutil
-import resource
+
 
 def increase_openfiles_limit(new_value: int):
     soft_limit, hard_limit = resource.getrlimit(resource.RLIMIT_NOFILE)
     resource.setrlimit(resource.RLIMIT_NOFILE, (new_value, hard_limit))  # Increase soft limit
 
 def setup_repo(repo_url: str, repo_name: str, branch_name: str):
-    """
-    Clones the repository from the given URL, checks out the specified branch, and changes the working directory to the cloned repository.
-    """
+    """Clones the repository from the given URL, checks out the specified branch, and changes the working directory to the cloned repository."""
     time.sleep(random.randint(2, 120))
 
     os.chdir("/workspace")
@@ -33,8 +33,7 @@ def setup_repo(repo_url: str, repo_name: str, branch_name: str):
     os.chdir(repo_name)
 
 def upload_file_to_centralfile(file_path, destination_name, project_name):
-    """
-    Uploads a file to a project directory in Centralfile.
+    """Uploads a file to a project directory in Centralfile.
 
     Args:
         file_path (str): Path to the file to upload.
@@ -69,9 +68,7 @@ def upload_file_to_centralfile(file_path, destination_name, project_name):
 
 
 def train_umc(inputs_dict):
-    """
-    Trains UMC model from the given config `inputs_dict`.
-    """
+    """Trains UMC model from the given config `inputs_dict`."""
     # print(os.listdir('pytorch_geometric/benchmark/data/PointCloud_UMC'))
     # 1. Increase open files limit to avoid CPU nuking the processes
     increase_openfiles_limit(100_000)
