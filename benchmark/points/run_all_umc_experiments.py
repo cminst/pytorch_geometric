@@ -265,7 +265,7 @@ def eval_stress_table(
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--root", type=str, default="../data/PointCloud_UMC")
+    ap.add_argument("--root", type=str, default=None)
     ap.add_argument("--dataset", type=str, default="ModelNet10",
                     choices=list(DATASET_INFO.keys()),
                     help="Dataset: ModelNet10, ModelNet40, or ShapeNet")
@@ -365,8 +365,14 @@ def main():
         needs_category_to_y=needs_category_to_y,
     )
 
+    print("Loading datasets (may process once on first run) - ", end="", flush=True)
+    if not args.root:
+        args.root = f'../data/{args.dataset}_UMC'
+        print(f"No root directory specified, using {args.root}", flush=True)
+    else:
+        print(args.root, flush=True)
+
     # Also keep a "dense raw" test set for stability analysis (no transform here)
-    print("Loading datasets (may process once on first run)...")
     test_dense_ds = load_dataset(
         name=args.dataset,
         root=args.root,
