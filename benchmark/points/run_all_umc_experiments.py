@@ -16,7 +16,7 @@ from torch_geometric.transforms import (
     NormalizeScale,
     SamplePoints,
 )
-from umc_pointcloud_utils import (
+from .umc_pointcloud_utils import (
     ComputePhiRWFromSym,
     CopyCategoryToY,
     ExtraCapacityControl,
@@ -36,7 +36,7 @@ from umc_pointcloud_utils import (
     train_model,
 )
 
-from datasets import ScanObjectNN
+from .datasets import ScanObjectNN
 
 # ----------------------------
 # Dataset Registry
