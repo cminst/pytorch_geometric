@@ -6,6 +6,7 @@ from typing import Callable, Optional
 
 import pandas as pd
 import torch
+from torch_geometric.data import Batch
 from torch.utils.data import Subset
 from torch_geometric.datasets import ModelNet
 from torch_geometric.loader import DataLoader
@@ -198,11 +199,55 @@ def split_train_val(ds, val_ratio: float, seed: int):
     return Subset(ds, train_idx), Subset(ds, val_idx)
 
 
-def make_loaders(train_ds, val_ds, test_ds, batch_size: int, seed: int, drop_last_train: bool = True):
+class CachedDataset:
+    """Simple dataset wrapper that returns deep copies of preprocessed items."""
+    def __init__(self, data_list):
+        self.data_list = data_list
+
+    def __len__(self):
+        return len(self.data_list)
+
+    def __getitem__(self, idx):
+        return copy.deepcopy(self.data_list[idx])
+
+
+def cache_dataset(dataset, num_workers: int = 0):
+    """Materialize a dataset once so we can reuse expensive transforms."""
+    if len(dataset) == 0:
+        return CachedDataset([])
+
+    persistent_workers = num_workers > 0
+    loader = DataLoader(
+        dataset,
+        batch_size=1,
+        shuffle=False,
+        drop_last=False,
+        num_workers=num_workers,
+        persistent_workers=persistent_workers,
+    )
+    cached = []
+    for batch in loader:
+        if isinstance(batch, Batch):
+            cached.extend(batch.to_data_list())
+        else:
+            cached.append(batch)
+    return CachedDataset(cached)
+
+
+def make_loaders(train_ds, val_ds, test_ds, batch_size: int, seed: int, drop_last_train: bool = True, num_workers: int = 0):
+    persistent_workers = num_workers > 0
     g = torch.Generator().manual_seed(seed)
-    train_loader = DataLoader(train_ds, batch_size=batch_size, shuffle=True, drop_last=drop_last_train, generator=g, num_workers=0)
-    val_loader   = DataLoader(val_ds,   batch_size=batch_size, shuffle=False, drop_last=False, num_workers=0)
-    test_loader  = DataLoader(test_ds,  batch_size=batch_size, shuffle=False, drop_last=False, num_workers=0)
+    train_loader = DataLoader(
+        train_ds,
+        batch_size=batch_size,
+        shuffle=True,
+        drop_last=drop_last_train,
+        generator=g,
+        num_workers=num_workers,
+        persistent_workers=persistent_workers,
+    )
+    val_loader   = DataLoader(val_ds,   batch_size=batch_size, shuffle=False, drop_last=False, num_workers=num_workers, persistent_workers=persistent_workers)
+    test_loader  = DataLoader(test_ds,  batch_size=batch_size, shuffle=False, drop_last=False, num_workers=num_workers, persistent_workers=persistent_workers)
     return train_loader, val_loader, test_loader
 
 
@@ -218,10 +263,12 @@ def eval_stress_table(
     K: int,
     device,
     batch_size: int,
-    seed: int
+    seed: int,
+    num_workers: int = 0,
 ):
     """Evaluate accuracy across bias levels with deterministic corruption per (seed, bias)."""
     out = {}
+    persistent_workers = num_workers > 0
     for bias in bias_levels:
         # deterministic per bias so all models see the "same" stress corruption
         seed_everything(seed + int(1000 * bias))
@@ -241,7 +288,14 @@ def eval_stress_table(
             transform=stress_transform,
             force_reload=False,
         )
-        loader = DataLoader(ds, batch_size=batch_size, shuffle=False, drop_last=False, num_workers=0)
+        loader = DataLoader(
+            ds,
+            batch_size=batch_size,
+            shuffle=False,
+            drop_last=False,
+            num_workers=num_workers,
+            persistent_workers=persistent_workers,
+        )
         acc = eval_accuracy(model, loader, device)
         out[f"stress_bias_{bias:.1f}"] = float(acc)
     return out
@@ -277,8 +331,18 @@ def main():
     ap.add_argument("--stability_items", type=int, default=200)
 
     ap.add_argument("--methods", type=str, default="naive,deg,invdeg,meandist,cap,umc", help="comma-separated methods to run")
+    ap.add_argument("--num_workers", type=int, default=0, help="DataLoader workers for train/eval (0 keeps everything on the main process).")
+    ap.add_argument("--torch_threads", type=int, default=None, help="Optional cap on torch threads to avoid overusing CPU cores during preprocessing.")
+    ap.add_argument("--no_cache_eval", dest="cache_eval", action="store_false", help="Disable caching val/test sets after the first preprocessing pass.")
+    ap.set_defaults(cache_eval=True)
 
     args = ap.parse_args()
+
+    if args.torch_threads is not None and args.torch_threads > 0:
+        torch.set_num_threads(args.torch_threads)
+        torch.set_num_interop_threads(max(1, args.torch_threads // 2))
+        os.environ["OMP_NUM_THREADS"] = str(args.torch_threads)
+        os.environ["MKL_NUM_THREADS"] = str(args.torch_threads)
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print("Device:", device)
@@ -431,8 +495,23 @@ def main():
             print(f"\n--- Seed {seed} ---")
 
             train_ds, val_ds = split_train_val(train_ds_full, val_ratio=args.val_ratio, seed=seed)
+
+            if args.cache_eval:
+                print("  Caching val/test once to reuse graph preprocessing...", flush=True)
+                val_ds_eff = cache_dataset(val_ds, num_workers=args.num_workers)
+                test_ds_eff = cache_dataset(test_ds, num_workers=args.num_workers)
+            else:
+                val_ds_eff = val_ds
+                test_ds_eff = test_ds
+
             train_loader, val_loader, test_loader = make_loaders(
-                train_ds, val_ds, test_ds, batch_size=args.batch_size, seed=seed, drop_last_train=True
+                train_ds,
+                val_ds_eff,
+                test_ds_eff,
+                batch_size=args.batch_size,
+                seed=seed,
+                drop_last_train=True,
+                num_workers=args.num_workers,
             )
 
             # Run baselines + capacity control
@@ -463,11 +542,19 @@ def main():
                     K=args.K,
                     device=device,
                     batch_size=args.batch_size,
-                    seed=seed
+                    seed=seed,
+                    num_workers=args.num_workers,
                 )
 
                 # correlations (for all; meaningful mainly for learned models)
-                corr_loader = DataLoader(test_ds, batch_size=args.batch_size, shuffle=False, drop_last=False, num_workers=0)
+                corr_loader = DataLoader(
+                    test_ds_eff,
+                    batch_size=args.batch_size,
+                    shuffle=False,
+                    drop_last=False,
+                    num_workers=args.num_workers,
+                    persistent_workers=args.num_workers > 0,
+                )
                 corrs = eval_weight_correlations(model, corr_loader, device, max_batches=20)
 
                 # feature stability (bias 0 vs bias S)
@@ -524,10 +611,18 @@ def main():
                     K=args.K,
                     device=device,
                     batch_size=args.batch_size,
-                    seed=seed
+                    seed=seed,
+                    num_workers=args.num_workers,
                 )
 
-                corr_loader = DataLoader(test_ds, batch_size=args.batch_size, shuffle=False, drop_last=False, num_workers=0)
+                corr_loader = DataLoader(
+                    test_ds_eff,
+                    batch_size=args.batch_size,
+                    shuffle=False,
+                    drop_last=False,
+                    num_workers=args.num_workers,
+                    persistent_workers=args.num_workers > 0,
+                )
                 corrs = eval_weight_correlations(model, corr_loader, device, max_batches=20)
 
                 dense_items = [test_dense_ds[i] for i in range(min(len(test_dense_ds), args.stability_items))]
