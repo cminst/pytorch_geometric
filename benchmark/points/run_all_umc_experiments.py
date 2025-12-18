@@ -367,7 +367,7 @@ def main():
 
     print("Loading datasets (may process once on first run) - ", end="", flush=True)
     if not args.root:
-        args.root = f'../data/{args.dataset}_UMC'
+        args.root = f'../data/{args.dataset}'
         print(f"No root directory specified, using {args.root}", flush=True)
     else:
         print(args.root, flush=True)
