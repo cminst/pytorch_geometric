@@ -95,6 +95,19 @@ def load_dataset(
     elif name == "ShapeNet":
         # ShapeNet uses split='trainval'/'test' instead of train=True/False
         split = "trainval" if train else "test"
+
+        # Download ShapeNet dataset from HF since link is broken
+        if not os.path.exists(root):
+            os.makedirs(root)
+
+        zip_path = os.path.join(root, "shapenetcore_partanno_segmentation_benchmark_v0_normal.zip")
+        if not os.path.exists(zip_path) or not os.listdir(os.path.dirname(zip_path)):
+            import urllib.request
+            url = "https://huggingface.co/datasets/cminst/ShapeNet/resolve/main/shapenetcore_partanno_segmentation_benchmark_v0_normal.zip"
+            print(f"Downloading ShapeNet dataset from {url}...")
+            urllib.request.urlretrieve(url, zip_path)
+            print("Download complete.")
+
         return ShapeNet(
             root=root,
             categories=None,  # Load all categories
