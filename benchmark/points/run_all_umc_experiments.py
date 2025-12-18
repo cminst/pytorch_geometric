@@ -95,13 +95,13 @@ def load_dataset(
             force_reload=force_reload,
         )
     elif name == "ScanObjectNN":
-        # This loads the PB_T50_RS variant!!
         return ScanObjectNN(
             root=root,
             train=train,
             pre_transform=pre_transform,
             transform=transform,
             force_reload=force_reload,
+            variant="OBJ_ONLY",
         )
     else:
         raise ValueError(f"Unknown dataset: {name}. Supported: {list(DATASET_INFO.keys())}")
