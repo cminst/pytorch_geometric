@@ -1,0 +1,2 @@
+dataset,train_mode,seed,variant,lambda_ortho,time_sec,best_val_acc,test_acc,test_ortho_corr,test_w_mean,test_w_min,test_w_max,test_ess_frac,stress_bias_0.0,stress_bias_1.0,stress_bias_2.0,stress_bias_3.0,stress_bias_4.0,corr_w_deg,corr_w_invdeg,corr_w_meandist,corr_w_invmeandist,feature_stability_cos
+ScanObjectNN,train_clean,41,naive,0.0,706.9574484825134,0.5714285714285714,0.5628227194492255,5.602318482045588e-05,1.0,1.0,1.0,1.0,0.5662650602409639,0.5180722891566265,0.45611015490533563,0.35111876075731496,0.3304647160068847,0.0,0.0,0.0,0.0,0.7695902500301599
