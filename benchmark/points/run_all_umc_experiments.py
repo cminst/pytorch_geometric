@@ -258,6 +258,52 @@ def make_loaders(train_ds, val_ds, test_ds, batch_size: int, seed: int, drop_las
     return train_loader, val_loader, test_loader
 
 
+def _format_float_for_name(value: float) -> str:
+    text = f"{value:.4g}"
+    return text.replace(".", "p").replace("-", "m")
+
+
+def make_curve_plot_path(
+    plots_dir: str,
+    dataset: str,
+    train_mode: str,
+    seed: int,
+    variant: str,
+    lambda_ortho: float,
+) -> str:
+    lam_str = _format_float_for_name(lambda_ortho)
+    filename = f"{dataset}_{train_mode}_seed{seed}_{variant}_lam{lam_str}.png"
+    return os.path.join(plots_dir, filename)
+
+
+def plot_val_test_curves(val_acc, test_acc, out_path: str, title: Optional[str] = None) -> None:
+    import matplotlib.pyplot as plt
+
+    epochs = list(range(1, len(val_acc) + 1))
+    fig, axes = plt.subplots(1, 2, figsize=(10, 4), sharex=True, sharey=True)
+
+    axes[0].plot(epochs, val_acc, marker="o", linewidth=1.5)
+    axes[0].set_title("Val Acc")
+
+    axes[1].plot(epochs, test_acc, marker="o", linewidth=1.5, color="tab:orange")
+    axes[1].set_title("Test Acc")
+
+    for ax in axes:
+        ax.set_xlabel("Epoch")
+        ax.set_ylabel("Accuracy")
+        ax.grid(True, alpha=0.3)
+        ax.set_xlim(1, len(epochs))
+
+    if title:
+        fig.suptitle(title, fontsize=10)
+        fig.tight_layout(rect=[0, 0.0, 1, 0.93])
+    else:
+        fig.tight_layout()
+
+    fig.savefig(out_path, dpi=150)
+    plt.close(fig)
+
+
 @torch.no_grad()
 def eval_stress_table(
     model,
@@ -343,6 +389,8 @@ def main():
     ap.add_argument("--num_workers", type=int, default=0, help="DataLoader workers for train/eval (0 keeps everything on the main process).")
     ap.add_argument("--torch_threads", type=int, default=None, help="Optional cap on torch threads to avoid overusing CPU cores during preprocessing.")
     ap.add_argument("--no_cache_eval", dest="cache_eval", action="store_false", help="Disable caching val/test sets after the first preprocessing pass.")
+    ap.add_argument("--plot_curves", action="store_true", help="Save val/test accuracy curves per run (evaluates test each epoch).")
+    ap.add_argument("--plots_dir", type=str, default="umc_plots", help="Output directory for val/test curve plots.")
     ap.set_defaults(cache_eval=True)
 
     args = ap.parse_args()
@@ -356,6 +404,8 @@ def main():
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print("Device:", device)
     print("Dataset:", args.dataset)
+    if args.plot_curves:
+        print("Plotting enabled: test accuracy will be evaluated each epoch.")
 
     # Get dataset info
     dataset_info = DATASET_INFO[args.dataset]
@@ -539,8 +589,34 @@ def main():
                 )
 
                 t0 = time.time()
-                metrics = train_model(model, train_loader, val_loader, test_loader, device, K=args.K, cfg=cfg)
+                metrics = train_model(
+                    model,
+                    train_loader,
+                    val_loader,
+                    test_loader,
+                    device,
+                    K=args.K,
+                    cfg=cfg,
+                    track_history=args.plot_curves,
+                )
                 dt = time.time() - t0
+                val_hist = metrics.pop("val_acc_history", None)
+                test_hist = metrics.pop("test_acc_history", None)
+
+                if args.plot_curves and val_hist and test_hist:
+                    os.makedirs(args.plots_dir, exist_ok=True)
+                    lam_for_name = 0.0 if lam is None else float(lam)
+                    plot_path = make_curve_plot_path(
+                        plots_dir=args.plots_dir,
+                        dataset=args.dataset,
+                        train_mode=mode_name,
+                        seed=seed,
+                        variant=tag,
+                        lambda_ortho=lam_for_name,
+                    )
+                    title = f"{args.dataset} | {mode_name} | seed={seed} | {tag} | lam={lam_for_name:g}"
+                    plot_val_test_curves(val_hist, test_hist, plot_path, title=title)
+                    print(f"Saved curve plot: {plot_path}")
 
                 # stress
                 stress = eval_stress_table(
@@ -609,8 +685,33 @@ def main():
                 )
 
                 t0 = time.time()
-                metrics = train_model(model, train_loader, val_loader, test_loader, device, K=args.K, cfg=cfg)
+                metrics = train_model(
+                    model,
+                    train_loader,
+                    val_loader,
+                    test_loader,
+                    device,
+                    K=args.K,
+                    cfg=cfg,
+                    track_history=args.plot_curves,
+                )
                 dt = time.time() - t0
+                val_hist = metrics.pop("val_acc_history", None)
+                test_hist = metrics.pop("test_acc_history", None)
+
+                if args.plot_curves and val_hist and test_hist:
+                    os.makedirs(args.plots_dir, exist_ok=True)
+                    plot_path = make_curve_plot_path(
+                        plots_dir=args.plots_dir,
+                        dataset=args.dataset,
+                        train_mode=mode_name,
+                        seed=seed,
+                        variant=tag,
+                        lambda_ortho=float(lam),
+                    )
+                    title = f"{args.dataset} | {mode_name} | seed={seed} | {tag} | lam={lam:g}"
+                    plot_val_test_curves(val_hist, test_hist, plot_path, title=title)
+                    print(f"Saved curve plot: {plot_path}")
 
                 stress = eval_stress_table(
                     model=model,

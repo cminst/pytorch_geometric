@@ -857,12 +857,15 @@ def train_model(
     device: torch.device,
     K: int,
     cfg: TrainConfig,
+    track_history: bool = False,
 ) -> Dict[str, Any]:
     """Train with validation selection (best val acc). Returns final test metrics + best checkpoint stats."""
     opt = torch.optim.Adam(model.parameters(), lr=cfg.lr, weight_decay=cfg.weight_decay)
 
     best_val = -1.0
     best_state = None
+    val_acc_history = [] if track_history else None
+    test_acc_history = [] if track_history else None
 
     for epoch in range(1, cfg.epochs + 1):
         model.train()
@@ -891,6 +894,10 @@ def train_model(
 
         # validate
         val_acc = eval_accuracy(model, val_loader, device)
+        if track_history:
+            val_acc_history.append(float(val_acc))
+            test_acc = eval_accuracy(model, test_loader, device)
+            test_acc_history.append(float(test_acc))
         if val_acc > best_val:
             best_val = val_acc
             best_state = {k: v.detach().cpu().clone() for k, v in model.state_dict().items()}
@@ -908,4 +915,6 @@ def train_model(
         "test_w_min": float(test_metrics["w_min"]),
         "test_w_max": float(test_metrics["w_max"]),
         "test_ess_frac": float(test_metrics["ess_frac"]),
+        "val_acc_history": val_acc_history,
+        "test_acc_history": test_acc_history,
     }
