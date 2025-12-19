@@ -26,6 +26,7 @@ from umc_pointcloud_utils import (
     MakeUndirected,
     MeanDistHeuristicClassifier,
     NoWeightClassifier,
+    PointMLPAffine,
     RandomIrregularResample,
     TrainConfig,
     UMCClassifier,
@@ -123,16 +124,19 @@ def build_pre_transform(dataset_name: str, dense_points: int) -> Compose:
 def build_train_transform_clean(
     num_points: int,
     knn_k: int,
-    K: int
+    K: int,
+    augment_affine: bool = False,
 ) -> Compose:
     """Build clean (uniform) training transform."""
-    transforms = [
-        IrregularResample(num_points=num_points, bias_strength=0.0),
+    transforms = [IrregularResample(num_points=num_points, bias_strength=0.0)]
+    if augment_affine:
+        transforms.append(PointMLPAffine())
+    transforms.extend([
         NormalizeScale(),
         KNNGraph(k=knn_k),
         MakeUndirected(),
         ComputePhiRWFromSym(K=K, store_aux=True),
-    ]
+    ])
     return Compose(transforms)
 
 
@@ -140,16 +144,19 @@ def build_train_transform_aug(
     num_points: int,
     knn_k: int,
     K: int,
-    max_bias: float
+    max_bias: float,
+    augment_affine: bool = False,
 ) -> Compose:
     """Build augmented (random bias) training transform."""
-    transforms = [
-        RandomIrregularResample(num_points=num_points, max_bias=max_bias),
+    transforms = [RandomIrregularResample(num_points=num_points, max_bias=max_bias)]
+    if augment_affine:
+        transforms.append(PointMLPAffine())
+    transforms.extend([
         NormalizeScale(),
         KNNGraph(k=knn_k),
         MakeUndirected(),
         ComputePhiRWFromSym(K=K, store_aux=True),
-    ]
+    ])
     return Compose(transforms)
 
 
@@ -319,6 +326,8 @@ def main():
 
     ap.add_argument("--max_bias_train", type=float, default=3.0, help="max bias for training augmentation mode")
     ap.add_argument("--train_mode", type=str, default="both", choices=["clean", "aug", "both"])
+    ap.add_argument("--augment_affine", action="store_true",
+                    help="Insert PointMLPAffine between resample and NormalizeScale for training transforms.")
 
     ap.add_argument("--seeds", type=str, default="0,1,2", help="comma-separated seeds")
     ap.add_argument("--bias_levels", type=str, default="0,1,2,3,4", help="comma-separated bias levels for stress test")
@@ -375,14 +384,16 @@ def main():
     train_transform_clean = build_train_transform_clean(
         num_points=args.num_points,
         knn_k=args.knn_k,
-        K=args.K
+        K=args.K,
+        augment_affine=args.augment_affine,
     )
 
     train_transform_aug = build_train_transform_aug(
         num_points=args.num_points,
         knn_k=args.knn_k,
         K=args.K,
-        max_bias=args.max_bias_train
+        max_bias=args.max_bias_train,
+        augment_affine=args.augment_affine,
     )
 
     # TEST: clean (uniform)

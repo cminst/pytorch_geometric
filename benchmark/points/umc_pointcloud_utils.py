@@ -114,6 +114,35 @@ class CopyCategoryToY(BaseTransform):
         return data
 
 
+class PointMLPAffine(BaseTransform):
+    def __init__(self,
+                 scale_low: float = 2.0/3.0,
+                 scale_high: float = 3.0/2.0,
+                 translate_low: float = -0.2,
+                 translate_high: float = 0.2):
+        self.scale_low = scale_low
+        self.scale_high = scale_high
+        self.translate_low = translate_low
+        self.translate_high = translate_high
+
+    def __call__(self, data):
+        # data.pos: [N,3]
+        pos = data.pos
+
+        # Per-axis scale factors (3-dim), like PointMLP
+        scales = (self.scale_low
+                  + (self.scale_high - self.scale_low)
+                  * torch.rand(3, device=pos.device))
+        # Per-axis translation
+        shifts = (self.translate_low
+                  + (self.translate_high - self.translate_low)
+                  * torch.rand(3, device=pos.device))
+
+        pos = pos * scales + shifts
+        data.pos = pos
+        return data
+
+
 class IrregularResample(BaseTransform):
     """Resample points with optional exponential bias along a random focus direction.
 
