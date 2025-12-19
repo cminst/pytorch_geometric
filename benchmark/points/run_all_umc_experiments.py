@@ -389,8 +389,8 @@ def main():
     ap.add_argument("--num_workers", type=int, default=0, help="DataLoader workers for train/eval (0 keeps everything on the main process).")
     ap.add_argument("--torch_threads", type=int, default=None, help="Optional cap on torch threads to avoid overusing CPU cores during preprocessing.")
     ap.add_argument("--no_cache_eval", dest="cache_eval", action="store_false", help="Disable caching val/test sets after the first preprocessing pass.")
-    ap.add_argument("--plot_curves", action="store_true", help="Save val/test accuracy curves per run (evaluates test each epoch).")
-    ap.add_argument("--plots_dir", type=str, default="umc_plots", help="Output directory for val/test curve plots.")
+    ap.add_argument("--plot_curves", action="store_true", help="Save val/test accuracy curves per run (PERFORMANCE PENALTY: evaluates test each epoch). If not set, will have regular training speeds.")
+    ap.add_argument("--plots_dir", type=str, default="umc_plots", help="Output directory for val/test curve plots (if plot_curves is set).")
     ap.set_defaults(cache_eval=True)
 
     args = ap.parse_args()
