@@ -354,6 +354,30 @@ def density_features(pos: torch.Tensor, edge_index: torch.Tensor, num_nodes: int
 # Networks
 # ----------------------------
 
+class PointEncoder(nn.Module):
+    """Per-point MLP to lift input features before spectral projection."""
+    def __init__(
+        self,
+        in_dim: int,
+        hidden_dims: Tuple[int, int] = (64, 128),
+        out_dim: int = 64,
+    ):
+        super().__init__()
+        h1, h2 = hidden_dims
+        self.mlp = nn.Sequential(
+            nn.Linear(in_dim, h1),
+            nn.BatchNorm1d(h1),
+            nn.ReLU(),
+            nn.Linear(h1, h2),
+            nn.BatchNorm1d(h2),
+            nn.ReLU(),
+            nn.Linear(h2, out_dim),
+        )
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return self.mlp(x)
+
+
 class WeightEstimator(nn.Module):
     """Predict per-point positive weights with per-graph normalization mean(w)=1."""
     def __init__(self, in_dim: int, hidden: Tuple[int, int] = (128, 64), eps: float = 1e-6):
@@ -444,7 +468,9 @@ class NoWeightClassifier(BaseModel):
     def __init__(self, K: int, num_classes: int, in_channels: int = 3):
         super().__init__()
         self.K = int(K)
-        self.core = SpectralHead(in_channels=in_channels, num_classes=num_classes, K=K)
+        point_out_dim = 64
+        self.point_encoder = PointEncoder(in_dim=in_channels, out_dim=point_out_dim)
+        self.core = SpectralHead(in_channels=point_out_dim, num_classes=num_classes, K=K)
 
     def forward(self, data: Data, return_features: bool = False):
         x = data.pos if getattr(data, "x", None) is None else data.x
@@ -453,9 +479,10 @@ class NoWeightClassifier(BaseModel):
         B, N = get_BN(data)
         total_nodes = B * N
 
+        x_feat = self.point_encoder(x)
         w = torch.ones(total_nodes, device=x.device, dtype=x.dtype)
 
-        f_hat = self.core.project(x=x, phi=phi, w=w, B=B)
+        f_hat = self.core.project(x=x_feat, phi=phi, w=w, B=B)
         y = self.core.features_from_fhat(f_hat)
         logp = self.core.logits_from_features(y)
 
@@ -469,7 +496,9 @@ class FixedDegreeClassifier(BaseModel):
     def __init__(self, K: int, num_classes: int, in_channels: int = 3, eps: float = 1e-12):
         super().__init__()
         self.K = int(K)
-        self.core = SpectralHead(in_channels=in_channels, num_classes=num_classes, K=K)
+        point_out_dim = 64
+        self.point_encoder = PointEncoder(in_dim=in_channels, out_dim=point_out_dim)
+        self.core = SpectralHead(in_channels=point_out_dim, num_classes=num_classes, K=K)
         self.eps = float(eps)
 
     def forward(self, data: Data, return_features: bool = False):
@@ -480,9 +509,10 @@ class FixedDegreeClassifier(BaseModel):
         B, N = get_BN(data)
         total_nodes = B * N
 
+        x_feat = self.point_encoder(x)
         w = normalize_weights_per_graph(deg, B=B, N=N, eps=self.eps)
 
-        f_hat = self.core.project(x=x, phi=phi, w=w, B=B)
+        f_hat = self.core.project(x=x_feat, phi=phi, w=w, B=B)
         y = self.core.features_from_fhat(f_hat)
         logp = self.core.logits_from_features(y)
 
@@ -496,7 +526,9 @@ class InvDegreeHeuristicClassifier(BaseModel):
     def __init__(self, K: int, num_classes: int, in_channels: int = 3, eps: float = 1e-6):
         super().__init__()
         self.K = int(K)
-        self.core = SpectralHead(in_channels=in_channels, num_classes=num_classes, K=K)
+        point_out_dim = 64
+        self.point_encoder = PointEncoder(in_dim=in_channels, out_dim=point_out_dim)
+        self.core = SpectralHead(in_channels=point_out_dim, num_classes=num_classes, K=K)
         self.eps = float(eps)
 
     def forward(self, data: Data, return_features: bool = False):
@@ -507,10 +539,11 @@ class InvDegreeHeuristicClassifier(BaseModel):
         B, N = get_BN(data)
         total_nodes = B * N
 
+        x_feat = self.point_encoder(x)
         w = 1.0 / (deg + self.eps)
         w = normalize_weights_per_graph(w, B=B, N=N, eps=self.eps)
 
-        f_hat = self.core.project(x=x, phi=phi, w=w, B=B)
+        f_hat = self.core.project(x=x_feat, phi=phi, w=w, B=B)
         y = self.core.features_from_fhat(f_hat)
         logp = self.core.logits_from_features(y)
 
@@ -527,7 +560,9 @@ class MeanDistHeuristicClassifier(BaseModel):
         if scatter_mean is None:
             raise ImportError("torch_scatter required for MeanDistHeuristicClassifier.")
         self.K = int(K)
-        self.core = SpectralHead(in_channels=in_channels, num_classes=num_classes, K=K)
+        point_out_dim = 64
+        self.point_encoder = PointEncoder(in_dim=in_channels, out_dim=point_out_dim)
+        self.core = SpectralHead(in_channels=point_out_dim, num_classes=num_classes, K=K)
         self.eps = float(eps)
 
     def forward(self, data: Data, return_features: bool = False):
@@ -537,11 +572,12 @@ class MeanDistHeuristicClassifier(BaseModel):
         B, N = get_BN(data)
         total_nodes = B * N
 
+        x_feat = self.point_encoder(x)
         mean_dist, _, _ = density_features(data.pos, data.edge_index, num_nodes=total_nodes)
         w = mean_dist.to(x.dtype)
         w = normalize_weights_per_graph(w, B=B, N=N, eps=self.eps)
 
-        f_hat = self.core.project(x=x, phi=phi, w=w, B=B)
+        f_hat = self.core.project(x=x_feat, phi=phi, w=w, B=B)
         y = self.core.features_from_fhat(f_hat)
         logp = self.core.logits_from_features(y)
 
@@ -576,8 +612,10 @@ class UMCClassifier(BaseModel):
         if self.use_density:
             in_dim += 3  # mean_dist, log_mean_dist, log_deg
 
+        point_out_dim = 64
+        self.point_encoder = PointEncoder(in_dim=in_channels, out_dim=point_out_dim)
         self.weight_net = WeightEstimator(in_dim=in_dim, hidden=weight_hidden)
-        self.core = SpectralHead(in_channels=in_channels, num_classes=num_classes, K=K)
+        self.core = SpectralHead(in_channels=point_out_dim, num_classes=num_classes, K=K)
 
     def _weight_features(self, data: Data) -> torch.Tensor:
         parts = []
@@ -599,10 +637,11 @@ class UMCClassifier(BaseModel):
         B, N = get_BN(data)
         total_nodes = B * N
 
+        x_feat = self.point_encoder(x)
         feat = self._weight_features(data)
         w_pred = self.weight_net(feat, B=B, N=N)
 
-        f_hat = self.core.project(x=x, phi=phi, w=w_pred, B=B)
+        f_hat = self.core.project(x=x_feat, phi=phi, w=w_pred, B=B)
         y = self.core.features_from_fhat(f_hat)
         logp = self.core.logits_from_features(y)
 
@@ -645,8 +684,10 @@ class ExtraCapacityControl(BaseModel):
         if self.use_density:
             in_dim += 3
 
+        point_out_dim = 64
+        self.point_encoder = PointEncoder(in_dim=in_channels, out_dim=point_out_dim)
         self.weight_net = WeightEstimator(in_dim=in_dim, hidden=weight_hidden)
-        self.core = SpectralHead(in_channels=in_channels, num_classes=num_classes, K=K)
+        self.core = SpectralHead(in_channels=point_out_dim, num_classes=num_classes, K=K)
 
     def _weight_features(self, data: Data) -> torch.Tensor:
         parts = []
@@ -666,13 +707,14 @@ class ExtraCapacityControl(BaseModel):
         B, N = get_BN(data)
         total_nodes = B * N
 
+        x_feat = self.point_encoder(x)
         feat = self._weight_features(data)
         w_pred = self.weight_net(feat, B=B, N=N)
 
         w_used = torch.ones_like(w_pred)
 
         # uniform projection of x
-        f_hat = self.core.project(x=x, phi=phi, w=w_used, B=B)
+        f_hat = self.core.project(x=x_feat, phi=phi, w=w_used, B=B)
 
         # project w_pred as a scalar signal, then broadcast to channels
         g_hat = self.core.project(
