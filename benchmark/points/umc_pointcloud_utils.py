@@ -125,11 +125,11 @@ class PointMLPAffine(BaseTransform):
         self.translate_low = translate_low
         self.translate_high = translate_high
 
-    def __call__(self, data):
+    def forward(self, data):
         # data.pos: [N,3]
         pos = data.pos
 
-        # Per-axis scale factors (3-dim), like PointMLP
+        # Per-axis scale factors (3-dim)
         scales = (self.scale_low
                   + (self.scale_high - self.scale_low)
                   * torch.rand(3, device=pos.device))
