@@ -711,13 +711,24 @@ def eval_accuracy(model: nn.Module, loader, device: torch.device) -> float:
     return correct / max(total, 1)
 
 @torch.no_grad()
-def eval_accuracy_with_metrics(model: nn.Module, loader, device: torch.device, K: int) -> Dict[str, float]:
+def eval_accuracy_with_metrics(
+    model: nn.Module,
+    loader,
+    device: torch.device,
+    K: int,
+    num_classes: Optional[int] = None,
+) -> Dict[str, float]:
     model.eval()
     correct = 0
     total = 0
     ortho_accum = 0.0
     batches = 0
     wstats_accum = None
+    correct_per_class = None
+    counts_per_class = None
+    if num_classes is not None and num_classes > 0:
+        correct_per_class = torch.zeros(num_classes, device=device)
+        counts_per_class = torch.zeros(num_classes, device=device)
 
     for data in loader:
         data = data.to(device)
@@ -725,6 +736,10 @@ def eval_accuracy_with_metrics(model: nn.Module, loader, device: torch.device, K
         pred = logp.argmax(dim=1)
         correct += int((pred == data.y).sum().item())
         total += int(data.y.numel())
+        if counts_per_class is not None:
+            y = data.y
+            counts_per_class += torch.bincount(y, minlength=num_classes).to(counts_per_class.dtype)
+            correct_per_class += torch.bincount(y[pred.eq(y)], minlength=num_classes).to(correct_per_class.dtype)
 
         B, N = aux["B"], aux["N"]
         o = float(orthogonality_loss_corr(data.phi, w, B=B, N=N, K=K).item())
@@ -744,7 +759,15 @@ def eval_accuracy_with_metrics(model: nn.Module, loader, device: torch.device, K
     for k in wstats_accum:
         wstats_accum[k] /= max(batches, 1)
 
-    return {"acc": acc, "ortho_corr": ortho, **wstats_accum}
+    metrics = {"acc": acc, "ortho_corr": ortho, **wstats_accum}
+    if counts_per_class is not None:
+        valid = counts_per_class > 0
+        if valid.any():
+            macc = (correct_per_class[valid] / counts_per_class[valid]).mean().item()
+        else:
+            macc = 0.0
+        metrics["macc"] = float(macc)
+    return metrics
 
 @torch.no_grad()
 def eval_weight_correlations(
@@ -857,6 +880,7 @@ def train_model(
     device: torch.device,
     K: int,
     cfg: TrainConfig,
+    num_classes: Optional[int] = None,
 ) -> Dict[str, Any]:
     """Train with validation selection (best val acc). Returns final test metrics + best checkpoint stats."""
     opt = torch.optim.Adam(model.parameters(), lr=cfg.lr, weight_decay=cfg.weight_decay)
@@ -899,10 +923,13 @@ def train_model(
     if best_state is not None:
         model.load_state_dict(best_state, strict=True)
 
-    test_metrics = eval_accuracy_with_metrics(model, test_loader, device, K=K)
+    test_metrics = eval_accuracy_with_metrics(model, test_loader, device, K=K, num_classes=num_classes)
+    test_macc = float(test_metrics.get("macc", 0.0))
+
     return {
         "best_val_acc": float(best_val),
         "test_acc": float(test_metrics["acc"]),
+        "test_macc": float(test_macc),
         "test_ortho_corr": float(test_metrics["ortho_corr"]),
         "test_w_mean": float(test_metrics["w_mean"]),
         "test_w_min": float(test_metrics["w_min"]),

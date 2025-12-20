@@ -539,7 +539,7 @@ def main():
                 )
 
                 t0 = time.time()
-                metrics = train_model(model, train_loader, val_loader, test_loader, device, K=args.K, cfg=cfg)
+                metrics = train_model(model, train_loader, val_loader, test_loader, device, K=args.K, cfg=cfg, num_classes=num_classes)
                 dt = time.time() - t0
 
                 # stress
@@ -593,7 +593,7 @@ def main():
                     "feature_stability_cos": stab,
                 }
                 rows.append(row)
-                print(f"[{mode_name} | seed={seed} | {tag}] test_acc={metrics['test_acc']*100:.2f}%  "
+                print(f"[{mode_name} | seed={seed} | {tag}] test_acc={metrics['test_acc']*100:.2f}% test_macc={metrics['test_macc']*100:.2f}%  "
                       f"stress@{bias_levels[-1]}={stress[f'stress_bias_{bias_levels[-1]:.1f}']*100:.2f}%")
 
             # UMC lambda sweep
@@ -609,7 +609,7 @@ def main():
                 )
 
                 t0 = time.time()
-                metrics = train_model(model, train_loader, val_loader, test_loader, device, K=args.K, cfg=cfg)
+                metrics = train_model(model, train_loader, val_loader, test_loader, device, K=args.K, cfg=cfg, num_classes=num_classes)
                 dt = time.time() - t0
 
                 stress = eval_stress_table(
@@ -660,7 +660,7 @@ def main():
                     "feature_stability_cos": stab,
                 }
                 rows.append(row)
-                print(f"[{mode_name} | seed={seed} | UMC lam={lam}] test_acc={metrics['test_acc']*100:.2f}%  "
+                print(f"[{mode_name} | seed={seed} | UMC lam={lam}] test_acc={metrics['test_acc']*100:.2f}% test_macc={metrics['test_macc']*100:.2f}%  "
                       f"stress@{bias_levels[-1]}={stress[f'stress_bias_{bias_levels[-1]:.1f}']*100:.2f}%")
 
     # ------------------------------------------------------------
@@ -675,6 +675,8 @@ def main():
     summary = df.groupby(group_cols).agg(
         test_acc_mean=("test_acc", "mean"),
         test_acc_std=("test_acc", "std"),
+        test_macc_mean=("test_macc", "mean"),
+        test_macc_std=("test_macc", "std"),
         stress_max_mean=(f"stress_bias_{bias_levels[-1]:.1f}", "mean"),
         stress_max_std=(f"stress_bias_{bias_levels[-1]:.1f}", "std"),
         stab_mean=("feature_stability_cos", "mean"),
@@ -684,6 +686,8 @@ def main():
     # nicer %
     summary["test_acc_mean"] *= 100
     summary["test_acc_std"] *= 100
+    summary["test_macc_mean"] *= 100
+    summary["test_macc_std"] *= 100
     summary["stress_max_mean"] *= 100
     summary["stress_max_std"] *= 100
 

@@ -124,9 +124,9 @@ def get_data():
         commit_sha=[None],
         # ------------------------- Script parameters
         dataset=["ModelNet40"],
-        train_mode=["aug"],
-        lambda_ortho_grid=[0,0.001,0.1,1,10],
-        methods=["naive","deg","invdeg","meandist","cap","umc"],
+        train_mode=["clean"],
+        lambda_ortho_grid=[0],
+        methods=["naive","deg","invdeg","meandist","cap"],
         seeds=[41,42,43],
     )
 
