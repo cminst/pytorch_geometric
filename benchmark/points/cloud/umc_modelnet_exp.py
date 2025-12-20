@@ -13,9 +13,18 @@ def increase_openfiles_limit(new_value: int):
     soft_limit, hard_limit = resource.getrlimit(resource.RLIMIT_NOFILE)
     resource.setrlimit(resource.RLIMIT_NOFILE, (new_value, hard_limit))  # Increase soft limit
 
-def setup_repo(repo_url: str, repo_name: str, branch_name: str):
-    """
-    Clones the repository from the given URL, checks out the specified branch, and changes the working directory to the cloned repository.
+def setup_repo(
+    repo_url: str,
+    repo_name: str,
+    branch_name: str,
+    commit_sha: str | None
+):
+    """Sets up the repository.
+
+    1. Clones the Git repository from the given URL.
+    2. Checks out the specified branch.
+    3. Changes the working directory to the cloned repository.
+    4. Optionally checks out a specific commit.
     """
     time.sleep(random.randint(2, 120))
 
@@ -32,9 +41,11 @@ def setup_repo(repo_url: str, repo_name: str, branch_name: str):
 
     os.chdir(repo_name)
 
+    if commit_sha:
+        subprocess.run(["git", "checkout", commit_sha])
+
 def upload_file_to_centralfile(file_path, destination_name, project_name):
-    """
-    Uploads a file to a project directory in Centralfile.
+    """Uploads a file to a project directory in Centralfile.
 
     Args:
         file_path (str): Path to the file to upload.
@@ -69,9 +80,7 @@ def upload_file_to_centralfile(file_path, destination_name, project_name):
 
 
 def train_umc(inputs_dict):
-    """
-    Trains UMC model from the given config `inputs_dict`.
-    """
+    """Trains UMC model from the given config `inputs_dict`."""
     # print(os.listdir('pytorch_geometric/benchmark/data/PointCloud_UMC'))
     # 1. Increase open files limit to avoid CPU nuking the processes
     increase_openfiles_limit(100_000)
@@ -80,7 +89,8 @@ def train_umc(inputs_dict):
     setup_repo(
         repo_url=inputs_dict["repo_url"],
         repo_name=inputs_dict["repo_name"],
-        branch_name=inputs_dict["branch_name"]
+        branch_name=inputs_dict["branch_name"],
+        commit_sha=inputs_dict["commit_sha"]
     )
     os.chdir("benchmark/points")
 
@@ -111,9 +121,10 @@ def get_data():
         repo_url=[f"https://{os.environ['GITHUB_PAT']}@github.com/cminst/pytorch_geometric.git"],
         repo_name=["pytorch_geometric"],
         branch_name=["main"],
+        commit_sha=["8ec4dc781109a4cbb99e80e942f1c31db384c3e5"],
         # ------------------------- Script parameters
         dataset=["ModelNet40"],
-        train_mode=["clean"],
+        train_mode=["aug","clean"],
         lambda_ortho_grid=[0,0.00001,0.0001,0.001,0.01,0.1,1,10,100,1000],
         methods=["umc"],
         seeds=[41,42,43],
