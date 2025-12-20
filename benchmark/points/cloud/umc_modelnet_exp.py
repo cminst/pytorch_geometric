@@ -111,7 +111,7 @@ def train_umc(inputs_dict):
     upload_file_to_centralfile(
         file_path="umc_sweep_results.csv",
         destination_name=f"results_{inputs_dict['dataset']}_{inputs_dict['train_mode']}_{inputs_dict['lambda_ortho_grid']}_{inputs_dict['methods']}_{inputs_dict['seeds']}.csv",
-        project_name="modelnet10_umc_burla"
+        project_name="modelnet40_umc_burla"
     )
 
 def get_data():
@@ -121,36 +121,23 @@ def get_data():
         repo_url=[f"https://{os.environ['GITHUB_PAT']}@github.com/cminst/pytorch_geometric.git"],
         repo_name=["pytorch_geometric"],
         branch_name=["main"],
-        commit_sha=["8ec4dc781109a4cbb99e80e942f1c31db384c3e5"],
+        commit_sha=[None],
         # ------------------------- Script parameters
         dataset=["ModelNet40"],
-        train_mode=["aug","clean"],
-        lambda_ortho_grid=[0,0.00001,0.0001,0.001,0.01,0.1,1,10,100,1000],
-        methods=["umc"],
+        train_mode=["aug"],
+        lambda_ortho_grid=[0,0.001,0.1,1,10],
+        methods=["naive","deg","invdeg","meandist","cap","umc"],
         seeds=[41,42,43],
     )
 
     sweep_runs = prepare_inputs(params_to_test)
 
-    # # Filter out already completed runs
-    # completed_configs = {
-    #     ("ModelNet10", "aug", 0, "umc", 43),
-    #     ("ModelNet10", "aug", 0.1, "umc", 44),
-    #     ("ModelNet10", "aug", 1, "umc", 45),
-    #     ("ModelNet10", "clean", 0, "umc", 41),
-    #     ("ModelNet10", "clean", 0.1, "umc", 42),
-    #     ("ModelNet10", "clean", 0.0001, "umc", 45),
-    #     ("ModelNet10", "clean", 0.001, "umc", 47),
-    #     ("ModelNet10", "clean", 1, "umc", 44),
-    #     ("ModelNet10", "clean", 1e-05, "umc", 43),
-    #     ("ModelNet10", "clean", 10, "umc", 46),
-    #     ("ModelNet10", "clean", 1000, "umc", 41),
-    # }
-
-    # sweep_runs = [
-    #     run for run in sweep_runs
-    #     if (run["dataset"], run["train_mode"], run["lambda_ortho_grid"], run["methods"], run["seeds"]) not in completed_configs
-    # ]
+    # Filter out non-UMC methods with non-zero lambda_ortho_grid
+    filtered_runs = []
+    for run in sweep_runs:
+        if run["methods"] == "umc" or run["lambda_ortho_grid"] == 0:
+            filtered_runs.append(run)
+    sweep_runs = filtered_runs
 
     rich_print(f"[bold yellow]Testing {len(sweep_runs)} configurations...[/bold yellow]")
     return sweep_runs

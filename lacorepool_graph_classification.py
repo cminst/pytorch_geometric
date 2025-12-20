@@ -1,41 +1,42 @@
-import torch
-from datetime import timedelta
-from typing import Tuple, Optional
 import argparse
 import hashlib
-import pickle
-import os
+import json
 import multiprocessing as mp
+import os
+import pickle
 from concurrent.futures import ProcessPoolExecutor
-from torch_geometric.utils import to_undirected
-from tqdm import tqdm
+from datetime import datetime, timedelta
+from typing import Optional, Tuple
+
+import numpy as np
+import torch
+import torch.multiprocessing as tmp
 import torch.nn as nn
 import torch.nn.functional as F
-import torch.multiprocessing as tmp
-from epsilon_seed_sweep import mean
-from torch_scatter import scatter_mean
-from torch_geometric.nn import GCNConv, global_mean_pool, global_max_pool
-from torch_geometric.loader import DataLoader
-from sklearn.model_selection import StratifiedKFold
-from sklearn.metrics import average_precision_score
-from torch.optim import Adam
-from torch.nn.functional import cross_entropy
-import numpy as np
-from torch_geometric.datasets import TUDataset
 from easydict import EasyDict as edict
-from datetime import datetime
-import json
+from epsilon_seed_sweep import mean
+from sklearn.metrics import average_precision_score
+from sklearn.model_selection import StratifiedKFold
+from torch.nn.functional import cross_entropy
+from torch.optim import Adam
+from torch_geometric.datasets import TUDataset
+from torch_geometric.loader import DataLoader
+from torch_geometric.nn import GCNConv, global_max_pool, global_mean_pool
+from torch_geometric.utils import to_undirected
+from torch_scatter import scatter_mean
+from tqdm import tqdm
+
 try:
     import wandb
 except ImportError:
     wandb = None
 
 from graph_classif_utils import (
-    compute_lacore_cover_for_graph,
-    LaCoreWrapped,
     Accumulator,
-    seed_all,
+    LaCoreWrapped,
+    compute_lacore_cover_for_graph,
     parse_seed_list,
+    seed_all,
 )
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -75,8 +76,7 @@ def precompute_lacore_assignments(
     max_clusters: Optional[int] = None,
     nproc: int = 2
 ):
-    """
-    Adds:
+    """Adds:
       data.cluster : LongTensor [num_nodes]  (local cluster id)
       data.num_clusters : LongTensor [1]     (number of clusters)
     to each Data in the dataset.
@@ -163,7 +163,6 @@ def validate_cache_config(cached_config: dict, current_config: dict) -> bool:
 
 def get_or_compute_lacore_dataset(original_dataset, config):
     """Get LaCore dataset from cache or compute it."""
-
     if config.cache_file:
         if not os.path.exists(config.cache_file):
             raise FileNotFoundError(f"Specified cache file not found: {config.cache_file}")
@@ -220,8 +219,7 @@ class LaCorePool(nn.Module):
         self, edge_index: torch.Tensor, batch: torch.Tensor,
         cluster: torch.Tensor, num_clusters_vec: torch.Tensor
     ) -> Tuple[torch.Tensor, torch.Tensor | None]:
-        """
-        Map original edges (u,v) to (Cu, Cv) using global cluster ids.
+        """Map original edges (u,v) to (Cu, Cv) using global cluster ids.
         Returns pooled edge_index [2, E'] (undirected, deduped) and optional edge_weight (None here).
         """
         B = int(num_clusters_vec.numel())
@@ -248,10 +246,9 @@ class LaCorePool(nn.Module):
         self, x: torch.Tensor, edge_index: torch.Tensor, batch: torch.Tensor,
         cluster: torch.Tensor, num_clusters_vec: torch.Tensor
     ):
-        """
-        x: [N, F], edge_index: [2, E], batch: [N] (graph id per node)
+        """x: [N, F], edge_index: [2, E], batch: [N] (graph id per node)
         cluster: [N] local cluster id per node
-        num_clusters_vec: [B] number of clusters for each graph in the batch
+        num_clusters_vec: [B] number of clusters for each graph in the batch.
         """
         device = x.device
         B = int(num_clusters_vec.numel())
@@ -519,8 +516,7 @@ def run_lacore_pool_experiment(
     protocol: Optional[str] = None,
     log_dir: Optional[str] = "./gpn24_logs",
 ):
-    """
-    Runs the LaCore pooling experiment with the given configuration.
+    """Runs the LaCore pooling experiment with the given configuration.
 
     If protocol='gpn24', runs GPN ICLR'24 evaluation protocol (20 seeds x 10 folds).
 

@@ -1,13 +1,15 @@
+import os
+import random
+import resource
+import shutil
+import subprocess
+import time
+
+import requests
 from burla import remote_parallel_map
 from rich import print as rich_print
 from rich.panel import Panel
-import os
-import time
-import random
-import subprocess
-import requests
-import shutil
-import resource
+
 
 def increase_openfiles_limit(new_value: int):
     soft_limit, hard_limit = resource.getrlimit(resource.RLIMIT_NOFILE)

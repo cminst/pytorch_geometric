@@ -1,10 +1,11 @@
-import os.path as osp
 import os
-import torch
+import os.path as osp
+
 import h5py
+import torch
 import torch_geometric.transforms as T
+from torch_geometric.data import Data, InMemoryDataset, download_url
 from torch_geometric.datasets import ModelNet
-from torch_geometric.data import InMemoryDataset, download_url, Data
 
 DEFAULT_MODELNET_ROOT = osp.join(
     osp.dirname(osp.realpath(__file__)), '..', 'data', 'ModelNet'

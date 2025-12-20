@@ -6,8 +6,8 @@ from typing import Callable, Optional
 
 import pandas as pd
 import torch
-from torch_geometric.data import Batch
 from torch.utils.data import Subset
+from torch_geometric.data import Batch
 from torch_geometric.datasets import ModelNet
 from torch_geometric.loader import DataLoader
 from torch_geometric.transforms import (
