@@ -241,42 +241,6 @@ class SpectralProjectionNet(nn.Module):
         y = y.reshape(B, -1)
         return F.log_softmax(self.mlp(y), dim=1)
 
-
-# class WeightEstimator(nn.Module):
-#     """
-#     Predict per-point weights w_i = psi_theta(features).
-
-#     Output constraints:
-#       - positivity via softplus
-#       - per-graph mass normalization so mean(w)=1
-
-#     This keeps weights comparable across graphs and prevents trivial scaling games.
-#     """
-#     def __init__(
-#         self,
-#         in_dim: int,
-#         hidden: Tuple[int, int] = (64, 32),
-#         eps: float = 1e-6,
-#     ):
-#         super().__init__()
-#         self.eps = float(eps)
-#         h1, h2 = hidden
-#         self.mlp = nn.Sequential(
-#             nn.Linear(in_dim, h1),
-#             nn.ReLU(),
-#             nn.Linear(h1, h2),
-#             nn.ReLU(),
-#             nn.Linear(h2, 1),
-#         )
-
-#     def forward(self, feat: torch.Tensor, batch_size: int, num_points: int) -> torch.Tensor:
-#         B = int(batch_size)
-#         N = int(num_points)
-#         raw = self.mlp(feat).view(B, N)
-#         w = F.softplus(raw) + self.eps
-#         w = w * (N / (w.sum(dim=1, keepdim=True) + self.eps))  # mean ~ 1
-#         return w.reshape(B * N)
-
 class WeightEstimator(nn.Module):
     def __init__(
         self,
