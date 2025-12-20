@@ -112,11 +112,11 @@ def get_data():
         repo_name=["pytorch_geometric"],
         branch_name=["main"],
         # ------------------------- Script parameters
-        dataset=["ModelNet10"],
-        train_mode=["clean", "aug"],
+        dataset=["ModelNet40"],
+        train_mode=["clean"],
         lambda_ortho_grid=[0,0.00001,0.0001,0.001,0.01,0.1,1,10,100,1000],
         methods=["umc"],
-        seeds=[41,42,43,44,45,46,47],
+        seeds=[41,42,43],
     )
 
     sweep_runs = prepare_inputs(params_to_test)
