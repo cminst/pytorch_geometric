@@ -2,15 +2,14 @@ import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.ticker import FuncFormatter, LogFormatterMathtext
 
-# Global plotting style
 plt.rcParams.update({
-    "font.size": 14,        # base size for most text
-    "axes.titlesize": 16,   # title of the axes
-    "axes.labelsize": 14,   # x- and y-axis labels
-    "xtick.labelsize": 12,  # tick labels on the x axis
-    "ytick.labelsize": 12,  # tick labels on the y axis
-    "legend.fontsize": 12,  # legend text
-    "figure.titlesize": 2   # figure-level title (suptitle)
+    "font.size": 14,
+    "axes.titlesize": 16,
+    "axes.labelsize": 14,
+    "xtick.labelsize": 12,
+    "ytick.labelsize": 12,
+    "legend.fontsize": 12,
+    "figure.titlesize": 2
 })
 
 LAMBDAS = [0, 0.00001, 0.0001, 0.001, 0.01, 0.1, 1, 10, 100, 1000]
@@ -22,9 +21,6 @@ PLOT_DATA = {
 }
 
 def make_umc_lambda_plot(train_mode, out_path):
-    """Plot mean±std test accuracy vs lambda_ortho (log x-axis) for UMC,
-    for a given train_mode ('train_aug' or 'train_clean').
-    """
     if train_mode not in PLOT_DATA:
         raise ValueError(f"Unknown train_mode: {train_mode}")
 
@@ -33,19 +29,17 @@ def make_umc_lambda_plot(train_mode, out_path):
     if len(mean_list) != len(LAMBDAS) or len(std_list) != len(LAMBDAS):
         raise ValueError("Each mean/std list must match the length of LAMBDAS.")
 
-    # Convert to numpy (values are already in %)
     lam = np.array(LAMBDAS, dtype=float)
     mean = np.array(mean_list, dtype=float)
     std = np.array(std_list, dtype=float)
 
-    # Fake a tiny positive value for lambda=0 so log scale works
     lam_plot = lam.copy()
     pos_mask = lam_plot > 0
     if pos_mask.any():
         min_pos = lam_plot[pos_mask].min()
         eps = min_pos / 10.0
     else:
-        eps = 1e-6  # fallback, shouldn't happen here
+        eps = 1e-6
     lam_plot[lam_plot == 0] = eps
 
     # Make the plot
@@ -57,7 +51,6 @@ def make_umc_lambda_plot(train_mode, out_path):
     ax.set_ylabel("Test accuracy (%)")
     ax.set_title("ModelNet40 Performance vs. $\lambda_{\mathrm{ortho}}$")
 
-    # Custom ticks: show fake-zero tick as "0"
     unique_lam = np.unique(lam)
     real_pos = sorted(v for v in unique_lam if v > 0)
     xticks = [eps] + real_pos
@@ -75,5 +68,4 @@ def make_umc_lambda_plot(train_mode, out_path):
     print(f"Saved {train_mode} plot to: {out_path}")
 
 
-# Make both plots
 make_umc_lambda_plot("train_clean","modelnet40_umc_trainclean_lambda_log.pdf")
