@@ -16,8 +16,8 @@ plt.rcParams.update({
 LAMBDAS = [0, 0.00001, 0.0001, 0.001, 0.01, 0.1, 1, 10, 100, 1000]
 PLOT_DATA = {
     "train_clean": {
-        "mean": [82.6, 82.3, 82.4, 83.4, 83.05, 84.72, 84.143, 84.2, 83.45, 81.14],
-        "std":  [0.4,  0.6,  0.65, 0.38,  0.57,  0.42,   0.61, 0.73, 0.89,  0.84],
+        "mean": [73.53, 73.23, 73.33, 74.33, 73.98, 75.65, 75.07, 75.13, 74.38, 72.07],
+        "std":  [1.141, 1.281, 1.316, 1.127, 1.26, 1.155, 1.288, 1.372, 1.484, 1.449],
     }
 }
 
@@ -62,7 +62,7 @@ def make_umc_lambda_plot(train_mode, out_path):
     real_pos = sorted(v for v in unique_lam if v > 0)
     xticks = [eps] + real_pos
     ax.set_xticks(xticks)
-    ax.set_ylim(79.2,86)
+    ax.set_ylim(79.2-9.67,86-8.07)
     log_formatter = LogFormatterMathtext(labelOnlyBase=False)
     def tick_label(val, _):
         if np.isclose(val, eps):

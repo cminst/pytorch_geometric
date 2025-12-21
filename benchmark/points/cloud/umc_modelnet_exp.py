@@ -124,9 +124,9 @@ def get_data():
         commit_sha=[None],
         # ------------------------- Script parameters
         dataset=["ModelNet40"],
-        train_mode=["clean"],
-        lambda_ortho_grid=[0],
-        methods=["naive","deg","invdeg","meandist","cap"],
+        train_mode=["aug"],
+        lambda_ortho_grid=[0,0.001,0.1,1,10],
+        methods=["naive","deg","invdeg","meandist","cap","umc"],
         seeds=[41,42,43],
     )
 
@@ -136,7 +136,31 @@ def get_data():
     filtered_runs = []
     for run in sweep_runs:
         if run["methods"] == "umc" or run["lambda_ortho_grid"] == 0:
-            filtered_runs.append(run)
+            # Check if this exact config was already completed
+            config_suffix = f"{run['dataset']}_{run['train_mode']}_{run['lambda_ortho_grid']}_{run['methods']}_{run['seeds']}"
+            already_completed = any(
+                f"results_{config_suffix}.csv" in file
+                for file in [
+                    "results_ModelNet40_aug_0_cap_41.csv",
+                    "results_ModelNet40_aug_0_cap_43.csv",
+                    "results_ModelNet40_aug_0_deg_42.csv",
+                    "results_ModelNet40_aug_0_invdeg_41.csv",
+                    "results_ModelNet40_aug_0_invdeg_43.csv",
+                    "results_ModelNet40_aug_0_meandist_42.csv",
+                    "results_ModelNet40_aug_0_naive_41.csv",
+                    "results_ModelNet40_aug_0_naive_43.csv",
+                    "results_ModelNet40_aug_0_umc_42.csv",
+                    "results_ModelNet40_aug_0.001_umc_41.csv",
+                    "results_ModelNet40_aug_0.1_umc_42.csv",
+                    "results_ModelNet40_aug_0.001_umc_43.csv",
+                    "results_ModelNet40_aug_1_umc_41.csv",
+                    "results_ModelNet40_aug_1_umc_43.csv",
+                    "results_ModelNet40_aug_10_umc_42.csv",
+                    "results_ModelNet40_aug_10_umc_43.csv",
+                ]
+            )
+            if not already_completed:
+                filtered_runs.append(run)
     sweep_runs = filtered_runs
 
     rich_print(f"[bold yellow]Testing {len(sweep_runs)} configurations...[/bold yellow]")
