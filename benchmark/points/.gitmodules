@@ -1,0 +1,3 @@
+[submodule "RGCNN"]
+	path = RGCNN
+	url = https://github.com/cminst/RGCNN.git
