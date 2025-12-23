@@ -66,6 +66,7 @@ DATASET_INFO = {
 RGCNN_DEFAULT_FILTERS = [128, 512, 1024, 512, 128]
 RGCNN_DEFAULT_ORDERS = [6, 5, 3, 1, 1]
 RGCNN_DEFAULT_FC = [512, 256]
+METHODS_REQUIRING_PHI = {"naive", "deg", "invdeg", "meandist", "cap", "umc"}
 
 
 def infer_rgcnn_feature_mode(sample) -> Tuple[str, int]:
@@ -204,6 +205,7 @@ def build_train_transform_clean(
     num_points: int,
     knn_k: int,
     K: int,
+    include_phi: bool = True,
     augment_affine: bool = False,
     phi_device: Optional[str] = None,
 ) -> Compose:
@@ -215,8 +217,9 @@ def build_train_transform_clean(
         NormalizeScale(),
         KNNGraph(k=knn_k),
         MakeUndirected(),
-        ComputePhiRWFromSym(K=K, store_aux=True, eig_device=phi_device),
     ])
+    if include_phi:
+        transforms.append(ComputePhiRWFromSym(K=K, store_aux=True, eig_device=phi_device))
     return Compose(transforms)
 
 
@@ -225,6 +228,7 @@ def build_train_transform_aug(
     knn_k: int,
     K: int,
     max_bias: float,
+    include_phi: bool = True,
     augment_affine: bool = False,
     phi_device: Optional[str] = None,
 ) -> Compose:
@@ -236,8 +240,9 @@ def build_train_transform_aug(
         NormalizeScale(),
         KNNGraph(k=knn_k),
         MakeUndirected(),
-        ComputePhiRWFromSym(K=K, store_aux=True, eig_device=phi_device),
     ])
+    if include_phi:
+        transforms.append(ComputePhiRWFromSym(K=K, store_aux=True, eig_device=phi_device))
     return Compose(transforms)
 
 
@@ -245,6 +250,7 @@ def build_test_transform_clean(
     num_points: int,
     knn_k: int,
     K: int,
+    include_phi: bool = True,
     phi_device: Optional[str] = None,
 ) -> Compose:
     """Build clean (uniform) test transform."""
@@ -253,8 +259,9 @@ def build_test_transform_clean(
         NormalizeScale(),
         KNNGraph(k=knn_k),
         MakeUndirected(),
-        ComputePhiRWFromSym(K=K, store_aux=True, eig_device=phi_device),
     ]
+    if include_phi:
+        transforms.append(ComputePhiRWFromSym(K=K, store_aux=True, eig_device=phi_device))
     return Compose(transforms)
 
 
@@ -263,6 +270,7 @@ def build_stress_transform(
     knn_k: int,
     K: int,
     bias_strength: float,
+    include_phi: bool = True,
     phi_device: Optional[str] = None,
 ) -> Compose:
     """Build stress test transform with specific bias level."""
@@ -271,8 +279,9 @@ def build_stress_transform(
         NormalizeScale(),
         KNNGraph(k=knn_k),
         MakeUndirected(),
-        ComputePhiRWFromSym(K=K, store_aux=True, eig_device=phi_device),
     ]
+    if include_phi:
+        transforms.append(ComputePhiRWFromSym(K=K, store_aux=True, eig_device=phi_device))
     return Compose(transforms)
 
 
@@ -348,6 +357,7 @@ def eval_stress_table(
     seed: int,
     num_workers: int = 0,
     phi_device: Optional[str] = None,
+    include_phi: bool = True,
 ):
     """Evaluate accuracy across bias levels with deterministic corruption per (seed, bias)."""
     out = {}
@@ -361,6 +371,7 @@ def eval_stress_table(
             knn_k=knn_k,
             K=K,
             bias_strength=float(bias),
+            include_phi=include_phi,
             phi_device=phi_device,
         )
 
@@ -421,10 +432,11 @@ def main():
     ap.add_argument("--num_workers", type=int, default=0, help="DataLoader workers for train/eval (0 keeps everything on the main process).")
     ap.add_argument("--torch_threads", type=int, default=None, help="Optional cap on torch threads to avoid overusing CPU cores during preprocessing.")
     ap.add_argument("--no_cache_eval", dest="cache_eval", action="store_false", help="Disable caching val/test sets after the first preprocessing pass.")
-    ap.set_defaults(cache_eval=True)
     ap.add_argument("-v", "--verbose", action="store_true", help="Print per-run timing information.")
+    ap.set_defaults(cache_eval=True)
 
     args = ap.parse_args()
+    print(args)
 
     if args.torch_threads is not None and args.torch_threads > 0:
         torch.set_num_threads(args.torch_threads)
@@ -447,6 +459,10 @@ def main():
     lambda_ortho_grid = [float(x) for x in args.lambda_ortho_grid.split(",") if x.strip() != ""]
 
     methods_to_run = {s.strip() for s in args.methods.split(",") if s.strip()}
+    methods_needing_phi = METHODS_REQUIRING_PHI.intersection(methods_to_run)
+    need_phi = bool(methods_needing_phi)
+    if not need_phi:
+        print("Phi computation disabled for transforms (no selected methods require it).")
 
     # ------------------------------------------------------------
     # Pre-transform: cache a dense (aligned) point set once.
@@ -464,6 +480,7 @@ def main():
         num_points=args.num_points,
         knn_k=args.knn_k,
         K=args.K,
+        include_phi=need_phi,
         augment_affine=args.augment_affine,
         phi_device=args.phi_device,
     )
@@ -473,6 +490,7 @@ def main():
         knn_k=args.knn_k,
         K=args.K,
         max_bias=args.max_bias_train,
+        include_phi=need_phi,
         augment_affine=args.augment_affine,
         phi_device=args.phi_device,
     )
@@ -482,6 +500,7 @@ def main():
         num_points=args.num_points,
         knn_k=args.knn_k,
         K=args.K,
+        include_phi=need_phi,
         phi_device=args.phi_device,
     )
 
@@ -491,6 +510,7 @@ def main():
         knn_k=args.knn_k,
         K=args.K,
         bias_strength=0.0,
+        include_phi=need_phi,
         phi_device=args.phi_device,
     )
     transform_biasS = build_stress_transform(
@@ -498,6 +518,7 @@ def main():
         knn_k=args.knn_k,
         K=args.K,
         bias_strength=float(args.stability_bias),
+        include_phi=need_phi,
         phi_device=args.phi_device,
     )
 
