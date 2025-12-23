@@ -690,6 +690,7 @@ def main():
                     batch_size=args.batch_size,
                     seed=seed,
                     num_workers=args.num_workers,
+                    include_phi=need_phi,
                     phi_device=args.phi_device,
                 )
 
@@ -762,6 +763,7 @@ def main():
                     batch_size=args.batch_size,
                     seed=seed,
                     num_workers=args.num_workers,
+                    include_phi=need_phi,
                     phi_device=args.phi_device,
                 )
 
