@@ -66,7 +66,10 @@ def eval_accuracy_with_metrics(
             correct_per_class += torch.bincount(y[pred.eq(y)], minlength=num_classes).to(correct_per_class.dtype)
 
         B, N = aux["B"], aux["N"]
-        o = float(orthogonality_loss_corr(data.phi, w, B=B, N=N, K=K).item())
+        if hasattr(data, "phi") and data.phi is not None:
+            o = float(orthogonality_loss_corr(data.phi, w, B=B, N=N, K=K).item())
+        else:
+            o = 0.0
         ortho_accum += o
 
         stats = batch_weight_stats(w, B=B, N=N)
@@ -208,7 +211,7 @@ def train_model(
     verbose: bool = False,
 ) -> Dict[str, Any]:
     """Train with validation selection (best val acc). Returns final test metrics + best checkpoint stats."""
-    print("Training started!", flush=True)
+    print(f"Training started! (verbose={verbose})", flush=True)
     opt = torch.optim.Adam(model.parameters(), lr=cfg.lr, weight_decay=cfg.weight_decay)
 
     best_val = -1.0
@@ -227,7 +230,12 @@ def train_model(
             cls_loss = F.nll_loss(logp, data.y)
 
             B, N = aux["B"], aux["N"]
-            ortho = orthogonality_loss_corr(data.phi, w, B=B, N=N, K=K, normalize=cfg.ortho_normalize)
+            phi = getattr(data, "phi", None)
+            if cfg.lambda_ortho > 0 and phi is None:
+                raise ValueError("lambda_ortho>0 requires data.phi; enable phi computation in transforms.")
+            ortho = 0.0
+            if cfg.lambda_ortho > 0 and phi is not None:
+                ortho = orthogonality_loss_corr(phi, w, B=B, N=N, K=K, normalize=cfg.ortho_normalize)
 
             w_reg = (w - 1.0).pow(2).mean()
 
