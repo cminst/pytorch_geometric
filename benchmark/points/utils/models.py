@@ -407,6 +407,7 @@ class MeanDistHeuristicClassifier(BaseModel):
 
     def forward(self, data: Data, return_features: bool = False):
         x = data.pos if getattr(data, "x", None) is None else data.x
+        assert x is not None, "Either data.pos or data.x is required"
         phi = data.phi
 
         B, N = get_BN(data)
@@ -460,6 +461,9 @@ class UMCClassifier(BaseModel):
             parts.append(data.pos)
 
         if self.use_density:
+            assert data.pos is not None, "data.pos is required"
+            assert data.edge_index is not None, "data.edge_index is required"
+            assert data.num_nodes is not None, "data.num_nodes is required"
             md, log_md, log_deg = density_features(data.pos, data.edge_index, num_nodes=data.num_nodes)
             parts.append(md.unsqueeze(1))
             parts.append(log_md.unsqueeze(1))
@@ -469,6 +473,8 @@ class UMCClassifier(BaseModel):
 
     def forward(self, data: Data, return_features: bool = False):
         x = data.pos if getattr(data, "x", None) is None else data.x
+        assert x is not None, "Either data.pos or data.x is required"
+
         phi = data.phi
 
         B, N = get_BN(data)
@@ -528,6 +534,9 @@ class ExtraCapacityControl(BaseModel):
         if self.use_pos:
             parts.append(data.pos)
         if self.use_density:
+            assert data.pos is not None, "data.pos is required"
+            assert data.edge_index is not None, "data.edge_index is required"
+            assert data.num_nodes is not None, "data.num_nodes is required"
             md, log_md, log_deg = density_features(data.pos, data.edge_index, num_nodes=data.num_nodes)
             parts.append(md.unsqueeze(1))
             parts.append(log_md.unsqueeze(1))
