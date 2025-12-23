@@ -47,9 +47,19 @@ except Exception:
 
 
 def get_BN(data: Data) -> tuple[int, int]:
-    """Returns (B, N) for both:
-    - Batch objects (from DataLoader): has num_graphs
-    - Single Data objects: no num_graphs -> treat as B=1.
+    """Returns (B, N) where:
+    - B: Number of batches/graphs in the data
+         For Batch objects (from DataLoader): uses data.num_graphs
+         For single Data objects: defaults to B=1
+    - N: Number of nodes per batch/graph
+         Calculated as total_nodes // B
+         If division is not exact, falls back to B=1 and N=total_nodes.
+
+    Args:
+        data: A PyG Data or Batch object
+
+    Returns:
+        tuple: (B, N) where B is the number of graphs and N is the number of nodes per graph
     """
     total_nodes = data.num_nodes
     if total_nodes is None:
@@ -69,6 +79,19 @@ def get_BN(data: Data) -> tuple[int, int]:
 
     return B, N
 
+def format_duration(seconds: float) -> str:
+    """Format a duration in seconds into a human-readable minutes/hours string."""
+    total_seconds = int(round(seconds))
+    if total_seconds >= 3600:
+        hours = total_seconds // 3600
+        minutes = (total_seconds % 3600) // 60
+        return f"{hours}:{minutes:02d} hours"
+    if total_seconds >= 60:
+        minutes = total_seconds // 60
+        secs = total_seconds % 60
+        return f"{minutes}:{secs:02d} minutes"
+    return f"{total_seconds} seconds"
+
 
 # ----------------------------
 # Reproducibility
@@ -85,178 +108,6 @@ def seed_everything(seed: int) -> None:
     # torch.backends.cudnn.deterministic = True
     # torch.backends.cudnn.benchmark = False
     torch.backends.cudnn.benchmark = True
-
-
-# ----------------------------
-# Transforms
-# ----------------------------
-
-class MakeUndirected(BaseTransform):
-    """Ensure edge_index is undirected by adding reverse edges (duplicates allowed)."""
-    def forward(self, data: Data) -> Data:
-        ei = data.edge_index
-        data.edge_index = torch.cat([ei, ei.flip(0)], dim=1)
-        return data
-
-
-class CopyCategoryToY(BaseTransform):
-    """For ShapeNet: copy the 'category' field to 'y' for consistent label access.
-
-    ShapeNet stores shape category in data.category (shape [1]) and per-point
-    segmentation labels in data.y. For classification tasks, we want data.y
-    to be the category label.
-
-    This transform is idempotent - safe to apply multiple times.
-    """
-    def forward(self, data: Data) -> Data:
-        if hasattr(data, 'category') and data.category is not None:
-            data.y = data.category.clone()
-        return data
-
-
-class PointMLPAffine(BaseTransform):
-    def __init__(self,
-                 scale_low: float = 2.0/3.0,
-                 scale_high: float = 3.0/2.0,
-                 translate_low: float = -0.2,
-                 translate_high: float = 0.2):
-        self.scale_low = scale_low
-        self.scale_high = scale_high
-        self.translate_low = translate_low
-        self.translate_high = translate_high
-
-    def forward(self, data):
-        # data.pos: [N,3]
-        pos = data.pos
-
-        # Per-axis scale factors (3-dim)
-        scales = (self.scale_low
-                  + (self.scale_high - self.scale_low)
-                  * torch.rand(3, device=pos.device))
-        # Per-axis translation
-        shifts = (self.translate_low
-                  + (self.translate_high - self.translate_low)
-                  * torch.rand(3, device=pos.device))
-
-        pos = pos * scales + shifts
-        data.pos = pos
-        return data
-
-
-class IrregularResample(BaseTransform):
-    """Resample points with optional exponential bias along a random focus direction.
-
-    - bias_strength = 0 => uniform downsample/upsample to num_points
-    - bias_strength > 0 => sample without replacement using softmax weights exp(bias * proj)
-
-    IMPORTANT: wipes edge_index/phi/deg so downstream transforms recompute them.
-    """
-    def __init__(self, num_points: int = 512, bias_strength: float = 0.0):
-        self.num_points = int(num_points)
-        self.bias = float(bias_strength)
-
-    def forward(self, data: Data) -> Data:
-        pos = data.pos
-        device = pos.device
-        N_curr = pos.size(0)
-
-        if self.bias > 1e-6:
-            focus = torch.randn(1, 3, device=device)
-            focus = focus / (focus.norm() + 1e-12)
-            proj = (pos @ focus.T).squeeze()     # [N]
-            proj = proj - proj.max()             # stability
-            weights = torch.exp(self.bias * proj)
-            weights = weights / (weights.sum() + 1e-12)
-            idx = torch.multinomial(weights, self.num_points, replacement=False)
-            data.pos = pos[idx]
-        else:
-            if N_curr >= self.num_points:
-                idx = torch.randperm(N_curr, device=device)[:self.num_points]
-                data.pos = pos[idx]
-            else:
-                idx = torch.randint(0, N_curr, (self.num_points,), device=device)
-                data.pos = pos[idx]
-
-        # wipe derived fields
-        for key in ["edge_index", "edge_attr", "phi", "phi_evals", "deg", "batch"]:
-            if hasattr(data, key):
-                delattr(data, key)
-
-        data.num_nodes = self.num_points
-        return data
-
-
-class RandomIrregularResample(BaseTransform):
-    """Sample a random bias in [0, max_bias] for each example."""
-    def __init__(self, num_points: int = 512, max_bias: float = 3.0):
-        self.num_points = int(num_points)
-        self.max_bias = float(max_bias)
-
-    def forward(self, data: Data) -> Data:
-        bias = float(torch.rand(1).item() * self.max_bias)
-        return IrregularResample(num_points=self.num_points, bias_strength=bias)(data)
-
-
-class ComputePhiRWFromSym(BaseTransform):
-    """Compute phi = D^{-1/2} U where U are eigenvectors of L_sym.
-
-    A is built from edge_index -> dense adjacency (binarized), diag=0.
-    deg is computed from A (consistent with phi construction) and stored in data.deg.
-    """
-    def __init__(
-        self,
-        K: int = 64,
-        eps: float = 1e-12,
-        store_aux: bool = True,
-        eig_device: Optional[Union[torch.device, str]] = None,
-    ):
-        self.K = int(K)
-        self.eps = float(eps)
-        self.store_aux = bool(store_aux)
-        self.eig_device = torch.device(eig_device) if eig_device is not None else None
-        self._warned_eig_fallback = False
-
-    def _resolve_eig_device(self, default_device: torch.device) -> torch.device:
-        if self.eig_device is None:
-            return default_device
-
-        if self.eig_device.type == "cuda" and not torch.cuda.is_available():
-            if not self._warned_eig_fallback:
-                print("ComputePhiRWFromSym: requested CUDA eig_device but CUDA is not available; falling back to CPU.")
-                self._warned_eig_fallback = True
-            return torch.device("cpu")
-        return self.eig_device
-
-    @torch.no_grad()
-    def forward(self, data: Data) -> Data:
-        N = int(data.num_nodes)
-        out_device = data.pos.device
-        eig_device = self._resolve_eig_device(out_device)
-
-        edge_index = data.edge_index.to(eig_device)
-        A = to_dense_adj(edge_index, max_num_nodes=N).squeeze(0)
-        A = (A > 0).to(dtype=torch.float32)
-        A.fill_diagonal_(0.0)
-
-        deg = A.sum(dim=1).clamp_min(self.eps)  # [N]
-        inv_sqrt_deg = deg.rsqrt()
-
-        L_sym = torch.eye(N, device=eig_device) - (inv_sqrt_deg[:, None] * A * inv_sqrt_deg[None, :])
-
-        # Debugging
-        # print(L_sym.shape)
-
-        evals, U = torch.linalg.eigh(L_sym)  # ascending
-        K = min(self.K, N)
-        U = U[:, :K]                         # [N,K]
-        phi = inv_sqrt_deg[:, None] * U      # [N,K]
-
-        data.phi = phi.to(out_device, dtype=torch.float32)
-        if self.store_aux:
-            data.phi_evals = evals[:K].to(out_device, dtype=torch.float32)
-            data.deg = deg.to(out_device, dtype=torch.float32)
-
-        return data
 
 
 # ----------------------------
@@ -338,7 +189,7 @@ def orthogonality_loss_corr(
 
 def corr_gram_error_single(phi: torch.Tensor, w: torch.Tensor, eps: float = 1e-12) -> torch.Tensor:
     """Single-graph corr Gram error ||C - I||_F^2 (not normalized).
-    phi: [N,K], w: [N]
+    phi: [N,K], w: [N].
     """
     K = phi.shape[1]
     G = phi.T @ (phi * w.view(-1, 1))
@@ -715,248 +566,3 @@ class ExtraCapacityControl(BaseModel):
         if return_features:
             return logp, w_pred, aux, y
         return logp, w_pred, aux
-
-
-# ----------------------------
-# Training / evaluation helpers
-# ----------------------------
-
-@torch.no_grad()
-def eval_accuracy(model: nn.Module, loader, device: torch.device) -> float:
-    model.eval()
-    correct = 0
-    total = 0
-    for data in loader:
-        data = data.to(device)
-        logp, _, _ = model(data)
-        pred = logp.argmax(dim=1)
-        correct += int((pred == data.y).sum().item())
-        total += int(data.y.numel())
-    return correct / max(total, 1)
-
-@torch.no_grad()
-def eval_accuracy_with_metrics(
-    model: nn.Module,
-    loader,
-    device: torch.device,
-    K: int,
-    num_classes: Optional[int] = None,
-) -> Dict[str, float]:
-    model.eval()
-    correct = 0
-    total = 0
-    ortho_accum = 0.0
-    batches = 0
-    wstats_accum = None
-    correct_per_class = None
-    counts_per_class = None
-    if num_classes is not None and num_classes > 0:
-        correct_per_class = torch.zeros(num_classes, device=device)
-        counts_per_class = torch.zeros(num_classes, device=device)
-
-    for data in loader:
-        data = data.to(device)
-        logp, w, aux = model(data)
-        pred = logp.argmax(dim=1)
-        correct += int((pred == data.y).sum().item())
-        total += int(data.y.numel())
-        if counts_per_class is not None:
-            y = data.y
-            counts_per_class += torch.bincount(y, minlength=num_classes).to(counts_per_class.dtype)
-            correct_per_class += torch.bincount(y[pred.eq(y)], minlength=num_classes).to(correct_per_class.dtype)
-
-        B, N = aux["B"], aux["N"]
-        o = float(orthogonality_loss_corr(data.phi, w, B=B, N=N, K=K).item())
-        ortho_accum += o
-
-        stats = batch_weight_stats(w, B=B, N=N)
-        if wstats_accum is None:
-            wstats_accum = stats
-        else:
-            for k in wstats_accum:
-                wstats_accum[k] += stats[k]
-
-        batches += 1
-
-    acc = correct / max(total, 1)
-    ortho = ortho_accum / max(batches, 1)
-    for k in wstats_accum:
-        wstats_accum[k] /= max(batches, 1)
-
-    metrics = {"acc": acc, "ortho_corr": ortho, **wstats_accum}
-    if counts_per_class is not None:
-        valid = counts_per_class > 0
-        if valid.any():
-            macc = (correct_per_class[valid] / counts_per_class[valid]).mean().item()
-        else:
-            macc = 0.0
-        metrics["macc"] = float(macc)
-    return metrics
-
-@torch.no_grad()
-def eval_weight_correlations(
-    model: nn.Module,
-    loader,
-    device: torch.device,
-    max_batches: int = 20,
-) -> Dict[str, float]:
-    """Average Pearson correlations between predicted/fixed w and density proxies.
-    Works for all models; for fixed-weight baselines it will show near-constant values.
-    """
-    if scatter_mean is None:
-        raise ImportError("torch_scatter required for eval_weight_correlations.")
-
-    model.eval()
-    acc = {"corr_w_deg": 0.0, "corr_w_invdeg": 0.0, "corr_w_meandist": 0.0, "corr_w_invmeandist": 0.0}
-    seen = 0
-
-    for b, data in enumerate(loader):
-        if b >= max_batches:
-            break
-        data = data.to(device)
-        _, w, aux = model(data)
-        B, N = aux["B"], aux["N"]
-
-        # use stored deg if available
-        if hasattr(data, "deg"):
-            deg = data.deg.to(w.dtype)
-        else:
-            row = data.edge_index[0]
-            deg = degree(row, num_nodes=data.num_nodes, dtype=w.dtype)
-
-        mean_dist, _, _ = density_features(data.pos, data.edge_index, num_nodes=data.num_nodes)
-        mean_dist = mean_dist.to(w.dtype)
-
-        # compute correlation per graph, then average
-        wb = w.view(B, N).detach()
-        db = deg.view(B, N).detach()
-        mb = mean_dist.view(B, N).detach()
-
-        for i in range(B):
-            wi = wb[i]
-            di = db[i]
-            mi = mb[i]
-            acc["corr_w_deg"] += float(pearson_corr(wi, di).item())
-            acc["corr_w_invdeg"] += float(pearson_corr(wi, 1.0 / (di + 1e-6)).item())
-            acc["corr_w_meandist"] += float(pearson_corr(wi, mi).item())
-            acc["corr_w_invmeandist"] += float(pearson_corr(wi, 1.0 / (mi + 1e-6)).item())
-            seen += 1
-
-    for k in acc:
-        acc[k] /= max(seen, 1)
-    return acc
-
-@torch.no_grad()
-def eval_feature_stability(
-    model: nn.Module,
-    data_list_dense: List[Data],
-    transform_bias0,
-    transform_bias1,
-    device: torch.device,
-    max_items: int = 200,
-) -> float:
-    """Cosine similarity between feature vectors y for the same shape under:
-      - bias0 resample
-      - bias1 resample
-    We wrap each Data into a Batch of size 1 so num_graphs exists.
-    """
-    model.eval()
-    sims = []
-    n = min(max_items, len(data_list_dense))
-
-    for i in range(n):
-        base = data_list_dense[i]
-
-        d0 = transform_bias0(base.clone())
-        d1 = transform_bias1(base.clone())
-
-        # Wrap to Batch(1)
-        d0 = Batch.from_data_list([d0]).to(device)
-        d1 = Batch.from_data_list([d1]).to(device)
-
-        _, _, _, y0 = model(d0, return_features=True)
-        _, _, _, y1 = model(d1, return_features=True)
-
-        v0 = y0[0]
-        v1 = y1[0]
-        sim = float(F.cosine_similarity(v0.unsqueeze(0), v1.unsqueeze(0), dim=1).item())
-        sims.append(sim)
-
-    return float(np.mean(sims)) if sims else 0.0
-
-
-@dataclass
-class TrainConfig:
-    epochs: int = 30
-    lr: float = 1e-3
-    weight_decay: float = 1e-4
-    lambda_ortho: float = 0.0
-    lambda_w_reg: float = 0.0
-    clip_grad: float = 0.0
-    ortho_normalize: bool = True
-
-
-def train_model(
-    model: nn.Module,
-    train_loader,
-    val_loader,
-    test_loader,
-    device: torch.device,
-    K: int,
-    cfg: TrainConfig,
-    num_classes: Optional[int] = None,
-) -> Dict[str, Any]:
-    """Train with validation selection (best val acc). Returns final test metrics + best checkpoint stats."""
-    opt = torch.optim.Adam(model.parameters(), lr=cfg.lr, weight_decay=cfg.weight_decay)
-
-    best_val = -1.0
-    best_state = None
-
-    for epoch in range(1, cfg.epochs + 1):
-        model.train()
-        for data in train_loader:
-            data = data.to(device)
-            logp, w, aux = model(data)
-
-            cls_loss = F.nll_loss(logp, data.y)
-
-            B, N = aux["B"], aux["N"]
-            ortho = orthogonality_loss_corr(data.phi, w, B=B, N=N, K=K, normalize=cfg.ortho_normalize)
-
-            w_reg = (w - 1.0).pow(2).mean()
-
-            loss = cls_loss
-            if cfg.lambda_ortho > 0:
-                loss = loss + cfg.lambda_ortho * ortho
-            if cfg.lambda_w_reg > 0 and aux.get("has_weight_net", False):
-                loss = loss + cfg.lambda_w_reg * w_reg
-
-            opt.zero_grad(set_to_none=True)
-            loss.backward()
-            if cfg.clip_grad and cfg.clip_grad > 0:
-                torch.nn.utils.clip_grad_norm_(model.parameters(), cfg.clip_grad)
-            opt.step()
-
-        # validate
-        val_acc = eval_accuracy(model, val_loader, device)
-        if val_acc > best_val:
-            best_val = val_acc
-            best_state = {k: v.detach().cpu().clone() for k, v in model.state_dict().items()}
-
-    # restore best
-    if best_state is not None:
-        model.load_state_dict(best_state, strict=True)
-
-    test_metrics = eval_accuracy_with_metrics(model, test_loader, device, K=K, num_classes=num_classes)
-    test_macc = float(test_metrics.get("macc", 0.0))
-
-    return {
-        "best_val_acc": float(best_val),
-        "test_acc": float(test_metrics["acc"]),
-        "test_macc": float(test_macc),
-        "test_ortho_corr": float(test_metrics["ortho_corr"]),
-        "test_w_mean": float(test_metrics["w_mean"]),
-        "test_w_min": float(test_metrics["w_min"]),
-        "test_w_max": float(test_metrics["w_max"]),
-        "test_ess_frac": float(test_metrics["ess_frac"]),
-    }

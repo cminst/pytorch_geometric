@@ -7,6 +7,7 @@ from typing import Callable, Optional, Tuple
 import pandas as pd
 import torch
 import torch.nn.functional as F
+from RGCNN.model import RGCNN_Cls
 from torch.utils.data import Subset
 from torch_geometric.data import Batch
 from torch_geometric.datasets import ModelNet
@@ -18,29 +19,33 @@ from torch_geometric.transforms import (
     SamplePoints,
 )
 from torch_geometric.utils import to_dense_batch
-from umc_pointcloud_utils import (
-    ComputePhiRWFromSym,
-    CopyCategoryToY,
+from utils.custom_datasets import ScanObjectNN
+from utils.models import (
     ExtraCapacityControl,
     FixedDegreeClassifier,
     InvDegreeHeuristicClassifier,
-    IrregularResample,
-    MakeUndirected,
     MeanDistHeuristicClassifier,
     NoWeightClassifier,
-    PointMLPAffine,
-    RandomIrregularResample,
-    TrainConfig,
     UMCClassifier,
+    format_duration,
+    seed_everything,
+)
+from utils.training import (
+    TrainConfig,
     eval_accuracy,
     eval_feature_stability,
     eval_weight_correlations,
-    seed_everything,
+    split_train_val,
     train_model,
 )
-
-from datasets import ScanObjectNN
-from RGCNN.model import RGCNN_Cls
+from utils.transforms import (
+    ComputePhiRWFromSym,
+    CopyCategoryToY,
+    IrregularResample,
+    MakeUndirected,
+    PointMLPAffine,
+    RandomIrregularResample,
+)
 
 # ----------------------------
 # Dataset Registry
@@ -275,14 +280,6 @@ def build_stress_transform(
 # Helper Functions
 # ----------------------------
 
-def split_train_val(ds, val_ratio: float, seed: int):
-    n = len(ds)
-    n_val = int(round(n * val_ratio))
-    idx = torch.randperm(n, generator=torch.Generator().manual_seed(seed)).tolist()
-    val_idx = idx[:n_val]
-    train_idx = idx[n_val:]
-    return Subset(ds, train_idx), Subset(ds, val_idx)
-
 
 class CachedDataset:
     """Simple dataset wrapper that returns deep copies of preprocessed items."""
@@ -425,6 +422,7 @@ def main():
     ap.add_argument("--torch_threads", type=int, default=None, help="Optional cap on torch threads to avoid overusing CPU cores during preprocessing.")
     ap.add_argument("--no_cache_eval", dest="cache_eval", action="store_false", help="Disable caching val/test sets after the first preprocessing pass.")
     ap.set_defaults(cache_eval=True)
+    ap.add_argument("-v", "--verbose", action="store_true", help="Print per-run timing information.")
 
     args = ap.parse_args()
 
@@ -645,6 +643,7 @@ def main():
                 t0 = time.time()
                 metrics = train_model(model, train_loader, val_loader, test_loader, device, K=args.K, cfg=cfg, num_classes=num_classes)
                 dt = time.time() - t0
+                timing_suffix = f" (took {format_duration(dt)})" if args.verbose else ""
 
                 # stress
                 stress = eval_stress_table(
@@ -699,7 +698,8 @@ def main():
                 }
                 rows.append(row)
                 print(f"[{mode_name} | seed={seed} | {tag}] test_acc={metrics['test_acc']*100:.2f}% test_macc={metrics['test_macc']*100:.2f}%  "
-                      f"stress@{bias_levels[-1]}={stress[f'stress_bias_{bias_levels[-1]:.1f}']*100:.2f}%")
+                      f"stress@{bias_levels[-1]}={stress[f'stress_bias_{bias_levels[-1]:.1f}']*100:.2f}%"
+                      f"{timing_suffix}")
 
             # UMC lambda sweep
             for tag, lam in umc_variants:
@@ -716,6 +716,7 @@ def main():
                 t0 = time.time()
                 metrics = train_model(model, train_loader, val_loader, test_loader, device, K=args.K, cfg=cfg, num_classes=num_classes)
                 dt = time.time() - t0
+                timing_suffix = f" (took {format_duration(dt)})" if args.verbose else ""
 
                 stress = eval_stress_table(
                     model=model,
@@ -767,7 +768,8 @@ def main():
                 }
                 rows.append(row)
                 print(f"[{mode_name} | seed={seed} | UMC lam={lam}] test_acc={metrics['test_acc']*100:.2f}% test_macc={metrics['test_macc']*100:.2f}%  "
-                      f"stress@{bias_levels[-1]}={stress[f'stress_bias_{bias_levels[-1]:.1f}']*100:.2f}%")
+                      f"stress@{bias_levels[-1]}={stress[f'stress_bias_{bias_levels[-1]:.1f}']*100:.2f}%"
+                      f"{timing_suffix}")
 
     # ------------------------------------------------------------
     # Save + summarize
