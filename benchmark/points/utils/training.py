@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import math
 import random
-from tqdm import tqdm
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple, Union
 
@@ -14,7 +13,14 @@ from torch.utils.data import Subset
 from torch_geometric.data import Batch, Data
 from torch_geometric.transforms import BaseTransform
 from torch_geometric.utils import degree, to_dense_adj
-from .models import orthogonality_loss_corr, batch_weight_stats, density_features
+from tqdm import tqdm
+
+from .models import (
+    batch_weight_stats,
+    density_features,
+    orthogonality_loss_corr,
+    pearson_corr,
+)
 
 try:
     from torch_scatter import scatter_mean
