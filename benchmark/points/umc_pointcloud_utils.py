@@ -243,7 +243,9 @@ class ComputePhiRWFromSym(BaseTransform):
 
         L_sym = torch.eye(N, device=eig_device) - (inv_sqrt_deg[:, None] * A * inv_sqrt_deg[None, :])
 
-        print(L_sym.shape)
+        # Debugging
+        # print(L_sym.shape)
+
         evals, U = torch.linalg.eigh(L_sym)  # ascending
         K = min(self.K, N)
         U = U[:, :K]                         # [N,K]
