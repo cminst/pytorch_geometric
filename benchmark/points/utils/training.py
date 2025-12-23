@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import math
 import random
+import tqdm
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple, Union
 
@@ -204,6 +205,7 @@ def train_model(
     K: int,
     cfg: TrainConfig,
     num_classes: Optional[int] = None,
+    verbose: bool = False,
 ) -> Dict[str, Any]:
     """Train with validation selection (best val acc). Returns final test metrics + best checkpoint stats."""
     opt = torch.optim.Adam(model.parameters(), lr=cfg.lr, weight_decay=cfg.weight_decay)
@@ -211,7 +213,11 @@ def train_model(
     best_val = -1.0
     best_state = None
 
-    for epoch in range(1, cfg.epochs + 1):
+    iterator = range(1, cfg.epochs + 1)
+    if verbose:
+        iterator = tqdm(iterator, desc="Training")
+
+    for epoch in iterator:
         model.train()
         for data in train_loader:
             data = data.to(device)
