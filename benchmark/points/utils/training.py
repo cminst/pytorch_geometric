@@ -9,6 +9,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from torch.utils.data import Subset
 from torch_geometric.data import Batch, Data
 from torch_geometric.transforms import BaseTransform
 from torch_geometric.utils import degree, to_dense_adj
