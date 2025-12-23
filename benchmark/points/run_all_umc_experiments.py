@@ -436,7 +436,7 @@ def main():
     ap.set_defaults(cache_eval=True)
 
     args = ap.parse_args()
-    print(args)
+    # print(args)
 
     if args.torch_threads is not None and args.torch_threads > 0:
         torch.set_num_threads(args.torch_threads)
@@ -746,7 +746,17 @@ def main():
                 )
 
                 t0 = time.time()
-                metrics = train_model(model, train_loader, val_loader, test_loader, device, K=args.K, cfg=cfg, num_classes=num_classes)
+                metrics = train_model(
+                    model,
+                    train_loader,
+                    val_loader,
+                    test_loader,
+                    device,
+                    K=args.K,
+                    cfg=cfg,
+                    num_classes=num_classes,
+                    verbose=args.verbose,
+                )
                 dt = time.time() - t0
                 timing_suffix = f" (took {format_duration(dt)})" if args.verbose else ""
 
