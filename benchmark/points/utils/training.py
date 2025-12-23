@@ -219,7 +219,7 @@ def train_model(
 
     iterator = range(1, cfg.epochs + 1)
     if verbose:
-        iterator = tqdm(iterator, desc="Training")
+        iterator = tqdm(iterator, desc="Training", unit="epoch")
 
     for epoch in iterator:
         model.train()
