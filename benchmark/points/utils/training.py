@@ -13,6 +13,7 @@ from torch.utils.data import Subset
 from torch_geometric.data import Batch, Data
 from torch_geometric.transforms import BaseTransform
 from torch_geometric.utils import degree, to_dense_adj
+from models import orthogonality_loss_corr
 
 try:
     from torch_scatter import scatter_mean
