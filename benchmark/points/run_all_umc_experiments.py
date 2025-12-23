@@ -200,6 +200,7 @@ def build_train_transform_clean(
     knn_k: int,
     K: int,
     augment_affine: bool = False,
+    phi_device: Optional[str] = None,
 ) -> Compose:
     """Build clean (uniform) training transform."""
     transforms = [IrregularResample(num_points=num_points, bias_strength=0.0)]
@@ -209,7 +210,7 @@ def build_train_transform_clean(
         NormalizeScale(),
         KNNGraph(k=knn_k),
         MakeUndirected(),
-        ComputePhiRWFromSym(K=K, store_aux=True),
+        ComputePhiRWFromSym(K=K, store_aux=True, eig_device=phi_device),
     ])
     return Compose(transforms)
 
@@ -220,6 +221,7 @@ def build_train_transform_aug(
     K: int,
     max_bias: float,
     augment_affine: bool = False,
+    phi_device: Optional[str] = None,
 ) -> Compose:
     """Build augmented (random bias) training transform."""
     transforms = [RandomIrregularResample(num_points=num_points, max_bias=max_bias)]
@@ -229,7 +231,7 @@ def build_train_transform_aug(
         NormalizeScale(),
         KNNGraph(k=knn_k),
         MakeUndirected(),
-        ComputePhiRWFromSym(K=K, store_aux=True),
+        ComputePhiRWFromSym(K=K, store_aux=True, eig_device=phi_device),
     ])
     return Compose(transforms)
 
@@ -237,7 +239,8 @@ def build_train_transform_aug(
 def build_test_transform_clean(
     num_points: int,
     knn_k: int,
-    K: int
+    K: int,
+    phi_device: Optional[str] = None,
 ) -> Compose:
     """Build clean (uniform) test transform."""
     transforms = [
@@ -245,7 +248,7 @@ def build_test_transform_clean(
         NormalizeScale(),
         KNNGraph(k=knn_k),
         MakeUndirected(),
-        ComputePhiRWFromSym(K=K, store_aux=True),
+        ComputePhiRWFromSym(K=K, store_aux=True, eig_device=phi_device),
     ]
     return Compose(transforms)
 
@@ -254,7 +257,8 @@ def build_stress_transform(
     num_points: int,
     knn_k: int,
     K: int,
-    bias_strength: float
+    bias_strength: float,
+    phi_device: Optional[str] = None,
 ) -> Compose:
     """Build stress test transform with specific bias level."""
     transforms = [
@@ -262,7 +266,7 @@ def build_stress_transform(
         NormalizeScale(),
         KNNGraph(k=knn_k),
         MakeUndirected(),
-        ComputePhiRWFromSym(K=K, store_aux=True),
+        ComputePhiRWFromSym(K=K, store_aux=True, eig_device=phi_device),
     ]
     return Compose(transforms)
 
@@ -346,6 +350,7 @@ def eval_stress_table(
     batch_size: int,
     seed: int,
     num_workers: int = 0,
+    phi_device: Optional[str] = None,
 ):
     """Evaluate accuracy across bias levels with deterministic corruption per (seed, bias)."""
     out = {}
@@ -358,7 +363,8 @@ def eval_stress_table(
             num_points=num_points,
             knn_k=knn_k,
             K=K,
-            bias_strength=float(bias)
+            bias_strength=float(bias),
+            phi_device=phi_device,
         )
 
         ds = load_dataset(
@@ -392,6 +398,7 @@ def main():
     ap.add_argument("--dense_points", type=int, default=2048)
     ap.add_argument("--K", type=int, default=64)
     ap.add_argument("--knn_k", type=int, default=20)
+    ap.add_argument("--phi_device", type=str, default=None, help="Device for torch.linalg.eigh when computing phi (e.g., 'cuda'). Defaults to the data tensor device.")
     ap.add_argument("--batch_size", type=int, default=16)
     ap.add_argument("--epochs", type=int, default=30)
     ap.add_argument("--lr", type=float, default=1e-3)
@@ -460,6 +467,7 @@ def main():
         knn_k=args.knn_k,
         K=args.K,
         augment_affine=args.augment_affine,
+        phi_device=args.phi_device,
     )
 
     train_transform_aug = build_train_transform_aug(
@@ -468,13 +476,15 @@ def main():
         K=args.K,
         max_bias=args.max_bias_train,
         augment_affine=args.augment_affine,
+        phi_device=args.phi_device,
     )
 
     # TEST: clean (uniform)
     test_transform_clean = build_test_transform_clean(
         num_points=args.num_points,
         knn_k=args.knn_k,
-        K=args.K
+        K=args.K,
+        phi_device=args.phi_device,
     )
 
     # Bias transforms for stability test
@@ -482,13 +492,15 @@ def main():
         num_points=args.num_points,
         knn_k=args.knn_k,
         K=args.K,
-        bias_strength=0.0
+        bias_strength=0.0,
+        phi_device=args.phi_device,
     )
     transform_biasS = build_stress_transform(
         num_points=args.num_points,
         knn_k=args.knn_k,
         K=args.K,
-        bias_strength=float(args.stability_bias)
+        bias_strength=float(args.stability_bias),
+        phi_device=args.phi_device,
     )
 
     print("Loading datasets (may process once on first run) - ", end="", flush=True)
@@ -648,6 +660,7 @@ def main():
                     batch_size=args.batch_size,
                     seed=seed,
                     num_workers=args.num_workers,
+                    phi_device=args.phi_device,
                 )
 
                 # correlations (for all; meaningful mainly for learned models)
@@ -717,6 +730,7 @@ def main():
                     batch_size=args.batch_size,
                     seed=seed,
                     num_workers=args.num_workers,
+                    phi_device=args.phi_device,
                 )
 
                 corr_loader = DataLoader(

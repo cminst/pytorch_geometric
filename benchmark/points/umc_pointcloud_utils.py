@@ -30,7 +30,7 @@ from __future__ import annotations
 import math
 import random
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 import numpy as np
 import torch
@@ -203,34 +203,55 @@ class ComputePhiRWFromSym(BaseTransform):
     A is built from edge_index -> dense adjacency (binarized), diag=0.
     deg is computed from A (consistent with phi construction) and stored in data.deg.
     """
-    def __init__(self, K: int = 64, eps: float = 1e-12, store_aux: bool = True):
+    def __init__(
+        self,
+        K: int = 64,
+        eps: float = 1e-12,
+        store_aux: bool = True,
+        eig_device: Optional[Union[torch.device, str]] = None,
+    ):
         self.K = int(K)
         self.eps = float(eps)
         self.store_aux = bool(store_aux)
+        self.eig_device = torch.device(eig_device) if eig_device is not None else None
+        self._warned_eig_fallback = False
+
+    def _resolve_eig_device(self, default_device: torch.device) -> torch.device:
+        if self.eig_device is None:
+            return default_device
+
+        if self.eig_device.type == "cuda" and not torch.cuda.is_available():
+            if not self._warned_eig_fallback:
+                print("ComputePhiRWFromSym: requested CUDA eig_device but CUDA is not available; falling back to CPU.")
+                self._warned_eig_fallback = True
+            return torch.device("cpu")
+        return self.eig_device
 
     @torch.no_grad()
     def forward(self, data: Data) -> Data:
         N = int(data.num_nodes)
-        device = data.pos.device
+        out_device = data.pos.device
+        eig_device = self._resolve_eig_device(out_device)
 
-        A = to_dense_adj(data.edge_index, max_num_nodes=N).squeeze(0).to(device)
+        edge_index = data.edge_index.to(eig_device)
+        A = to_dense_adj(edge_index, max_num_nodes=N).squeeze(0)
         A = (A > 0).to(dtype=torch.float32)
         A.fill_diagonal_(0.0)
 
         deg = A.sum(dim=1).clamp_min(self.eps)  # [N]
         inv_sqrt_deg = deg.rsqrt()
 
-        L_sym = torch.eye(N, device=device) - (inv_sqrt_deg[:, None] * A * inv_sqrt_deg[None, :])
+        L_sym = torch.eye(N, device=eig_device) - (inv_sqrt_deg[:, None] * A * inv_sqrt_deg[None, :])
 
         evals, U = torch.linalg.eigh(L_sym)  # ascending
         K = min(self.K, N)
         U = U[:, :K]                         # [N,K]
         phi = inv_sqrt_deg[:, None] * U      # [N,K]
 
-        data.phi = phi.to(torch.float32)
+        data.phi = phi.to(out_device, dtype=torch.float32)
         if self.store_aux:
-            data.phi_evals = evals[:K].to(torch.float32)
-            data.deg = deg.to(torch.float32)
+            data.phi_evals = evals[:K].to(out_device, dtype=torch.float32)
+            data.deg = deg.to(out_device, dtype=torch.float32)
 
         return data
 
