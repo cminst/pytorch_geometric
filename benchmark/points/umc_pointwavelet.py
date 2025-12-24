@@ -23,7 +23,7 @@ import csv
 import os
 import random
 from dataclasses import asdict
-from typing import Iterable, List, Tuple
+from typing import Iterable, List, Optional, Tuple
 
 import numpy as np
 import torch
@@ -43,6 +43,36 @@ def _device() -> torch.device:
     if hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
         return torch.device("mps")
     return torch.device("cpu")
+
+
+def _wandb_run_name(wf_learnable: bool, method: str) -> str:
+    base = "PointWavelet-L" if wf_learnable else "PointWavelet"
+    if method == "pointwavelet_umc":
+        return f"{base}-UMC"
+    return base
+
+
+def _init_wandb(enabled: bool, args: argparse.Namespace, method: str, seed: int):
+    if not enabled:
+        return None
+    try:
+        import wandb
+    except ModuleNotFoundError as exc:
+        raise RuntimeError(
+            "wandb is enabled but not installed. Install it with `pip install wandb` "
+            "or disable logging via `--no-wandb`."
+        ) from exc
+
+    run_name = _wandb_run_name(bool(args.wf_learnable), method)
+    config = {**vars(args), "method": method, "seed": seed}
+    return wandb.init(
+        project="UMC",
+        name=run_name,
+        config=config,
+        job_type=method,
+        tags=[method],
+        reinit=True,
+    )
 
 
 def set_seed(seed: int) -> None:
@@ -162,6 +192,7 @@ def train_one(
     lr_gamma: float,
     amp: bool,
     num_classes: int,
+    wandb_run: Optional[object] = None,
 ) -> dict:
     model = model.to(device)
 
@@ -210,6 +241,16 @@ def train_one(
             f"Epoch {epoch:03d} | loss={avg_loss:.4f} | lr={lr_now:.2e} | test_OA={metrics['oa']*100:.2f} | test_mAcc={metrics['macc']*100:.2f}",
             flush=True,
         )
+        if wandb_run is not None:
+            wandb_run.log(
+                {
+                    "loss": avg_loss,
+                    "lr": lr_now,
+                    "test_OA": metrics["oa"] * 100,
+                    "test_mAcc": metrics["macc"] * 100,
+                },
+                step=epoch,
+            )
 
     final = eval_metrics(model, test_loader, device=device, num_classes=num_classes)
     return {"final": final, "best": best}
@@ -236,6 +277,12 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--lr_gamma", type=float, default=0.7)
     p.add_argument("--amp", action="store_true", help="Use CUDA AMP (fp16) if available")
     p.add_argument("--seeds", type=str, default="0", help="Comma-separated seeds, e.g. '0,1,2,3'")
+    p.add_argument(
+        "--wandb",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Enable Weights & Biases logging.",
+    )
 
     # PointWavelet variant
     # Default to PointWavelet-L (learnable basis). Use --no-wf_learnable to
@@ -311,6 +358,7 @@ def main() -> None:
 
         # Method 1: PointWavelet
         print("\n--- Method: PointWavelet ---", flush=True)
+        run = _init_wandb(bool(args.wandb), args, method="pointwavelet", seed=seed)
         model = build_model(
             use_umc=False,
             wf_learnable=bool(args.wf_learnable),
@@ -332,7 +380,10 @@ def main() -> None:
             lr_gamma=args.lr_gamma,
             amp=bool(args.amp),
             num_classes=num_classes,
+            wandb_run=run,
         )
+        if run is not None:
+            run.finish()
         results.append({"seed": seed, "method": "pointwavelet", **out["final"], "best_oa": out["best"]["oa"], "best_epoch": out["best"]["epoch"]})
 
         # Free memory between runs
@@ -342,6 +393,7 @@ def main() -> None:
 
         # Method 2: PointWavelet + UMC
         print("\n--- Method: PointWavelet + UMC ---", flush=True)
+        run = _init_wandb(bool(args.wandb), args, method="pointwavelet_umc", seed=seed)
         model = build_model(
             use_umc=True,
             wf_learnable=bool(args.wf_learnable),
@@ -363,7 +415,10 @@ def main() -> None:
             lr_gamma=args.lr_gamma,
             amp=bool(args.amp),
             num_classes=num_classes,
+            wandb_run=run,
         )
+        if run is not None:
+            run.finish()
         results.append({"seed": seed, "method": "pointwavelet_umc", **out["final"], "best_oa": out["best"]["oa"], "best_epoch": out["best"]["epoch"]})
 
         del model
