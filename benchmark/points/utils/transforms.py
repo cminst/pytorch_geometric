@@ -57,6 +57,21 @@ class PointMLPAffine(BaseTransform):
         return data
 
 
+class PointJitter(BaseTransform):
+    """Add per-point Gaussian noise to positions (PointNet++ style jitter)."""
+    def __init__(self, sigma: float = 0.01, clip: float = 0.05):
+        self.sigma = float(sigma)
+        self.clip = float(clip)
+
+    def forward(self, data: Data) -> Data:
+        pos = data.pos
+        jitter = torch.randn_like(pos) * self.sigma
+        if self.clip > 0:
+            jitter = jitter.clamp(-self.clip, self.clip)
+        data.pos = pos + jitter
+        return data
+
+
 class IrregularResample(BaseTransform):
     """Resample points with optional exponential bias along a random focus direction.
 

@@ -24,6 +24,7 @@ coverage.xml
 *.out
 *.pt
 *.onnx
+*AGENTS.md
 examples/**/*.png
 examples/**/*.pdf
 benchmark/results/

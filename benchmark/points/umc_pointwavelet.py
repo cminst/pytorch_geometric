@@ -34,6 +34,7 @@ from torch_geometric.datasets import ModelNet
 from torch_geometric.transforms import Compose, NormalizeScale, SamplePoints
 
 from pointwavelet import PointWaveletClassifier, PointWaveletClsConfig
+from utils.transforms import PointJitter, PointMLPAffine
 
 
 def _device() -> torch.device:
@@ -87,10 +88,36 @@ def collate_points(items) -> Tuple[torch.Tensor, torch.Tensor]:
 
 
 def build_datasets(root: str, num_points: int, force_reload: bool, modelnet: str) -> Tuple[ModelNet, ModelNet]:
-    # SamplePoints is used as pre_transform so it is cached once per shape.
-    pre = Compose([SamplePoints(num_points), NormalizeScale()])
-    train_ds = ModelNet(root=root, name=modelnet, train=True, pre_transform=pre, transform=None, force_reload=force_reload)
-    test_ds = ModelNet(root=root, name=modelnet, train=False, pre_transform=pre, transform=None, force_reload=force_reload)
+    train_transform = Compose(
+        [
+            SamplePoints(num_points),
+            NormalizeScale(),
+            PointMLPAffine(),
+            PointJitter(),
+        ]
+    )
+    test_transform = Compose(
+        [
+            SamplePoints(num_points),
+            NormalizeScale(),
+        ]
+    )
+    train_ds = ModelNet(
+        root=root,
+        name=modelnet,
+        train=True,
+        pre_transform=None,
+        transform=train_transform,
+        force_reload=force_reload,
+    )
+    test_ds = ModelNet(
+        root=root,
+        name=modelnet,
+        train=False,
+        pre_transform=None,
+        transform=test_transform,
+        force_reload=force_reload,
+    )
     return train_ds, test_ds
 
 
@@ -250,8 +277,6 @@ def main() -> None:
     umc_hidden = _parse_int_pair(args.umc_hidden)
     seeds = _parse_seeds(args.seeds)
 
-    # If you previously processed ModelNet{10,40} with a different pre_transform (e.g., 2048 points),
-    # set --force_reload to ensure the cached processed dataset matches --num_points.
     train_ds, test_ds = build_datasets(
         args.data_root,
         args.num_points,
