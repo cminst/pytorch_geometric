@@ -43,6 +43,13 @@ class SAWaveletConfig:
     wf_beta: float = 0.05
     wf_sigma_mode: str = "mean"
 
+    # Universal Measure Correction (UMC)
+    wf_use_umc: bool = False
+    wf_umc_hidden: tuple[int, int] = (32, 32)
+    wf_umc_knn: int = 8
+    wf_umc_min_weight: float = 1e-3
+    wf_umc_use_inverse: bool = True
+
 
 class PointNetSetAbstractionWavelet(nn.Module):
     """PointNet++ Set Abstraction (sampling + grouping) + WaveletFormer spectral block.
@@ -88,6 +95,11 @@ class PointNetSetAbstractionWavelet(nn.Module):
                 beta=cfg.wf_beta,
                 depth=cfg.wf_depth,
                 num_heads=cfg.wf_heads,
+                use_umc=cfg.wf_use_umc,
+                umc_hidden=cfg.wf_umc_hidden,
+                umc_knn=cfg.wf_umc_knn,
+                umc_min_weight=cfg.wf_umc_min_weight,
+                umc_use_inverse=cfg.wf_umc_use_inverse,
             )
         )
 
@@ -124,7 +136,8 @@ class PointNetSetAbstractionWavelet(nn.Module):
         patch_feats = new_points.view(P, self.k, self.out_channels)
         patch_xyz = grouped_xyz_norm.view(P, self.k, 3)
 
-        patch_out = self.wf(patch_feats, xyz=patch_xyz if not self.cfg.wf_learnable else None)  # (P,k,C_out)
+        # Always pass patch_xyz; WaveletFormer will ignore it unless needed.
+        patch_out = self.wf(patch_feats, xyz=patch_xyz)  # (P,k,C_out)
         patch_out = patch_out.view(B, self.npoint, self.k, self.out_channels)
 
         # Pool over neighbors

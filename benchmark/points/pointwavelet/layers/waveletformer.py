@@ -6,6 +6,8 @@ from typing import List, Optional, Tuple
 import torch
 import torch.nn as nn
 
+from pointwavelet.utils.pointnet2_utils import square_distance
+
 from pointwavelet.layers.graph_wavelet import (
     LearnableSpectralBasis,
     WaveletSpec,
@@ -61,6 +63,35 @@ class WaveletFormerConfig:
     dropout: float = 0.0
     attn_dropout: float = 0.0
 
+    # Universal Measure Correction (UMC) style quadrature weights
+    # If enabled, WaveletFormer will compute coefficients as Psi_s (W x)
+    # and reconstruct back with an additional W^{-1} factor.
+    use_umc: bool = False
+    umc_hidden: Tuple[int, int] = (32, 32)
+    umc_knn: int = 8  # neighbors for mean-distance density proxy inside each patch
+    umc_min_weight: float = 1e-3
+    umc_use_inverse: bool = True
+
+
+class UMCWeightNet(nn.Module):
+    """Predict per-node nonnegative quadrature weights from local geometry."""
+
+    def __init__(self, in_dim: int = 6, hidden: Tuple[int, int] = (32, 32)) -> None:
+        super().__init__()
+        h1, h2 = hidden
+        self.net = nn.Sequential(
+            nn.Linear(in_dim, h1),
+            nn.ReLU(inplace=True),
+            nn.Linear(h1, h2),
+            nn.ReLU(inplace=True),
+            nn.Linear(h2, 1),
+            nn.Softplus(),
+        )
+
+    def forward(self, feats: torch.Tensor) -> torch.Tensor:
+        # feats: (P,n,in_dim) -> (P,n)
+        return self.net(feats).squeeze(-1)
+
 
 class WaveletFormer(nn.Module):
     """WaveletFormer layer (PointWavelet / PointWavelet-L core).
@@ -108,6 +139,10 @@ class WaveletFormer(nn.Module):
         if cfg.learnable:
             self.learnable_basis = LearnableSpectralBasis(n=cfg.n_nodes, beta=cfg.beta)
 
+        self.umc: Optional[UMCWeightNet] = None
+        if cfg.use_umc:
+            self.umc = UMCWeightNet(in_dim=6, hidden=cfg.umc_hidden)
+
     def regularization_loss(self) -> torch.Tensor:
         if self.learnable_basis is None:
             return torch.zeros((), device=next(self.parameters()).device)
@@ -136,12 +171,46 @@ class WaveletFormer(nn.Module):
             raise ValueError(f"Expected n_nodes={self.cfg.n_nodes}, got n={n}")
         if C != self.cfg.dim:
             raise ValueError(f"Expected dim={self.cfg.dim}, got C={C}")
+        # xyz is required for the eigendecomposition basis, and also for UMC weight prediction.
         if (self.learnable_basis is None) and (xyz is None):
             raise ValueError("xyz must be provided for eigendecomposition version")
+        if self.cfg.use_umc and xyz is None:
+            raise ValueError("xyz must be provided when use_umc=True")
 
         U, lambdas = self._get_basis(xyz)  # U: (P,n,n) or (n,n)
 
-        # Compute spectral transform of input once.
+        # Optional UMC weighting in the vertex domain.
+        w: Optional[torch.Tensor] = None
+        if self.umc is not None:
+            # xyz: (P,n,3)
+            assert xyz is not None
+            # Pairwise squared distances in the patch.
+            dist2 = square_distance(xyz, xyz)  # (P,n,n)
+            big = torch.eye(n, device=dist2.device, dtype=dist2.dtype).view(1, n, n) * 1e6
+            dist2 = dist2 + big  # mask diagonal
+
+            k = int(min(max(self.cfg.umc_knn, 1), n - 1))
+            nn2 = dist2.topk(k, dim=-1, largest=False).values  # (P,n,k)
+            md = torch.sqrt(torch.clamp(nn2, min=0.0)).mean(dim=-1)  # (P,n)
+
+            r = torch.sqrt(torch.clamp((xyz ** 2).sum(dim=-1), min=self.cfg.eps))  # (P,n)
+            feats = torch.cat(
+                [
+                    xyz,
+                    r.unsqueeze(-1),
+                    md.unsqueeze(-1),
+                    torch.log(md.unsqueeze(-1) + self.cfg.eps),
+                ],
+                dim=-1,
+            )  # (P,n,6)
+
+            w = self.umc(feats)  # (P,n)
+            # Normalize per patch so sum(w)=n.
+            w = w * (float(n) / torch.clamp(w.sum(dim=-1, keepdim=True), min=self.cfg.eps))
+            w = torch.clamp(w, min=self.cfg.umc_min_weight)
+            x = x * w.unsqueeze(-1)
+
+        # Compute spectral transform of (possibly reweighted) input once.
         x_freq = _einsum_ut_x(U, x)  # (P,n,C)
 
         # Multi-scale wavelet coefficients (still in vertex domain after filtering)
@@ -184,4 +253,8 @@ class WaveletFormer(nn.Module):
 
         out_freq = agg_freq * p_inv.unsqueeze(-1)
         out = _einsum_u_x(U, out_freq)
+
+        # If we used coefficients Psi_s (W x), reconstruct with an additional W^{-1}.
+        if (w is not None) and self.cfg.umc_use_inverse:
+            out = out / torch.clamp(w.unsqueeze(-1), min=self.cfg.umc_min_weight)
         return out

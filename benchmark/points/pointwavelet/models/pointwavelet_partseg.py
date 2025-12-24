@@ -28,6 +28,13 @@ class PointWaveletPartSegConfig:
     wf_heads: int = 4
     wf_sigma_mode: str = "mean"
 
+    # Universal Measure Correction (UMC)
+    wf_use_umc: bool = False
+    wf_umc_hidden: tuple[int, int] = (32, 32)
+    wf_umc_knn: int = 8
+    wf_umc_min_weight: float = 1e-3
+    wf_umc_use_inverse: bool = True
+
 
 class PointWaveletPartSeg(nn.Module):
     """PointWavelet / PointWavelet-L part segmentation network.
@@ -61,6 +68,9 @@ class PointWaveletPartSeg(nn.Module):
                 wf_depth=cfg.wf_depth, wf_heads=cfg.wf_heads, wf_J=cfg.wf_J,
                 wf_scales=cfg.wf_scales, wf_learnable=cfg.wf_learnable,
                 wf_beta=cfg.wf_beta, wf_sigma_mode=cfg.wf_sigma_mode,
+                wf_use_umc=cfg.wf_use_umc, wf_umc_hidden=cfg.wf_umc_hidden,
+                wf_umc_knn=cfg.wf_umc_knn, wf_umc_min_weight=cfg.wf_umc_min_weight,
+                wf_umc_use_inverse=cfg.wf_umc_use_inverse,
             ),
         )
         self.sa2 = PointNetSetAbstractionWavelet(
@@ -70,6 +80,9 @@ class PointWaveletPartSeg(nn.Module):
                 wf_depth=cfg.wf_depth, wf_heads=cfg.wf_heads, wf_J=cfg.wf_J,
                 wf_scales=cfg.wf_scales, wf_learnable=cfg.wf_learnable,
                 wf_beta=cfg.wf_beta, wf_sigma_mode=cfg.wf_sigma_mode,
+                wf_use_umc=cfg.wf_use_umc, wf_umc_hidden=cfg.wf_umc_hidden,
+                wf_umc_knn=cfg.wf_umc_knn, wf_umc_min_weight=cfg.wf_umc_min_weight,
+                wf_umc_use_inverse=cfg.wf_umc_use_inverse,
             ),
         )
         self.sa3 = PointNetSetAbstractionWavelet(
@@ -79,6 +92,9 @@ class PointWaveletPartSeg(nn.Module):
                 wf_depth=cfg.wf_depth, wf_heads=cfg.wf_heads, wf_J=cfg.wf_J,
                 wf_scales=cfg.wf_scales, wf_learnable=cfg.wf_learnable,
                 wf_beta=cfg.wf_beta, wf_sigma_mode=cfg.wf_sigma_mode,
+                wf_use_umc=cfg.wf_use_umc, wf_umc_hidden=cfg.wf_umc_hidden,
+                wf_umc_knn=cfg.wf_umc_knn, wf_umc_min_weight=cfg.wf_umc_min_weight,
+                wf_umc_use_inverse=cfg.wf_umc_use_inverse,
             ),
         )
         self.sa4 = PointNetSetAbstractionWavelet(
@@ -88,6 +104,9 @@ class PointWaveletPartSeg(nn.Module):
                 wf_depth=cfg.wf_depth, wf_heads=cfg.wf_heads, wf_J=cfg.wf_J,
                 wf_scales=cfg.wf_scales, wf_learnable=cfg.wf_learnable,
                 wf_beta=cfg.wf_beta, wf_sigma_mode=cfg.wf_sigma_mode,
+                wf_use_umc=cfg.wf_use_umc, wf_umc_hidden=cfg.wf_umc_hidden,
+                wf_umc_knn=cfg.wf_umc_knn, wf_umc_min_weight=cfg.wf_umc_min_weight,
+                wf_umc_use_inverse=cfg.wf_umc_use_inverse,
             ),
         )
 
