@@ -1,11 +1,11 @@
-"""Train/evaluate PointWavelet baselines on ModelNet40.
+"""Train/evaluate PointWavelet baselines on ModelNet10/40.
 
 This script intentionally runs only two methods:
   1) PointWavelet (default: PointWavelet-L, i.e. learnable spectral basis)
   2) PointWavelet + UMC (learned quadrature weights inside WaveletFormer)
 
 Paper-faithful parts implemented here:
-  - 1024 points sampled from ModelNet40 meshes
+  - 1024 points sampled from ModelNet meshes
   - SA config: (512/128/32/1) centroids with k=32 neighbors
   - WaveletFormer: 2 transformer encoders, 4 heads per WF block
   - Mexican hat wavelet: h(λ)=exp(-λ^4), g(λ)=λ exp(-λ)
@@ -55,7 +55,7 @@ def set_seed(seed: int) -> None:
 
 
 @torch.no_grad()
-def eval_metrics(model: torch.nn.Module, loader: DataLoader, device: torch.device, num_classes: int = 40) -> dict:
+def eval_metrics(model: torch.nn.Module, loader: DataLoader, device: torch.device, num_classes: int) -> dict:
     model.eval()
     correct = 0
     total = 0
@@ -86,11 +86,11 @@ def collate_points(items) -> Tuple[torch.Tensor, torch.Tensor]:
     return xyz, y
 
 
-def build_datasets(root: str, num_points: int, force_reload: bool) -> Tuple[ModelNet, ModelNet]:
+def build_datasets(root: str, num_points: int, force_reload: bool, modelnet: str) -> Tuple[ModelNet, ModelNet]:
     # SamplePoints is used as pre_transform so it is cached once per shape.
     pre = Compose([SamplePoints(num_points), NormalizeScale()])
-    train_ds = ModelNet(root=root, name="40", train=True, pre_transform=pre, transform=None, force_reload=force_reload)
-    test_ds = ModelNet(root=root, name="40", train=False, pre_transform=pre, transform=None, force_reload=force_reload)
+    train_ds = ModelNet(root=root, name=modelnet, train=True, pre_transform=pre, transform=None, force_reload=force_reload)
+    test_ds = ModelNet(root=root, name=modelnet, train=False, pre_transform=pre, transform=None, force_reload=force_reload)
     return train_ds, test_ds
 
 
@@ -101,11 +101,12 @@ def build_model(
     umc_knn: int,
     umc_min_weight: float,
     umc_use_inverse: bool,
+    num_classes: int,
     wf_J: int = 5,
     wf_beta: float = 0.05,
 ) -> PointWaveletClassifier:
     cfg = PointWaveletClsConfig(
-        num_classes=40,
+        num_classes=num_classes,
         input_channels=0,
         wf_learnable=wf_learnable,
         wf_beta=wf_beta,
@@ -133,6 +134,7 @@ def train_one(
     lr_step: int,
     lr_gamma: float,
     amp: bool,
+    num_classes: int,
 ) -> dict:
     model = model.to(device)
 
@@ -171,7 +173,7 @@ def train_one(
 
         scheduler.step()
 
-        metrics = eval_metrics(model, test_loader, device=device, num_classes=40)
+        metrics = eval_metrics(model, test_loader, device=device, num_classes=num_classes)
         if metrics["oa"] > best["oa"]:
             best = {**metrics, "epoch": epoch}
 
@@ -182,13 +184,20 @@ def train_one(
             flush=True,
         )
 
-    final = eval_metrics(model, test_loader, device=device, num_classes=40)
+    final = eval_metrics(model, test_loader, device=device, num_classes=num_classes)
     return {"final": final, "best": best}
 
 
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser()
-    p.add_argument("--data_root", type=str, default="data", help="Root directory for torch_geometric ModelNet40")
+    p.add_argument("--data_root", type=str, default="data", help="Root directory for torch_geometric ModelNet")
+    p.add_argument(
+        "--modelnet",
+        type=str,
+        default="40",
+        choices=["10", "40"],
+        help="Which dataset split to use: ModelNet10 or ModelNet40.",
+    )
     p.add_argument("--force_reload", action="store_true", help="Force reprocessing the dataset")
     p.add_argument("--num_points", type=int, default=1024)
     p.add_argument("--batch_size", type=int, default=16)
@@ -241,9 +250,14 @@ def main() -> None:
     umc_hidden = _parse_int_pair(args.umc_hidden)
     seeds = _parse_seeds(args.seeds)
 
-    # If you previously processed ModelNet40 with a different pre_transform (e.g., 2048 points),
+    # If you previously processed ModelNet{10,40} with a different pre_transform (e.g., 2048 points),
     # set --force_reload to ensure the cached processed dataset matches --num_points.
-    train_ds, test_ds = build_datasets(args.data_root, args.num_points, force_reload=bool(args.force_reload))
+    train_ds, test_ds = build_datasets(
+        args.data_root,
+        args.num_points,
+        force_reload=bool(args.force_reload),
+        modelnet=str(args.modelnet),
+    )
 
     train_loader = DataLoader(
         train_ds,
@@ -264,6 +278,7 @@ def main() -> None:
         pin_memory=(device.type == "cuda"),
     )
 
+    num_classes = 10 if str(args.modelnet) == "10" else 40
     results: List[dict] = []
     for seed in seeds:
         set_seed(seed)
@@ -278,6 +293,7 @@ def main() -> None:
             umc_knn=args.umc_knn,
             umc_min_weight=args.umc_min_weight,
             umc_use_inverse=not bool(args.umc_no_inverse),
+            num_classes=num_classes,
         )
         out = train_one(
             model,
@@ -290,6 +306,7 @@ def main() -> None:
             lr_step=args.lr_step,
             lr_gamma=args.lr_gamma,
             amp=bool(args.amp),
+            num_classes=num_classes,
         )
         results.append({"seed": seed, "method": "pointwavelet", **out["final"], "best_oa": out["best"]["oa"], "best_epoch": out["best"]["epoch"]})
 
@@ -307,6 +324,7 @@ def main() -> None:
             umc_knn=args.umc_knn,
             umc_min_weight=args.umc_min_weight,
             umc_use_inverse=not bool(args.umc_no_inverse),
+            num_classes=num_classes,
         )
         out = train_one(
             model,
@@ -319,6 +337,7 @@ def main() -> None:
             lr_step=args.lr_step,
             lr_gamma=args.lr_gamma,
             amp=bool(args.amp),
+            num_classes=num_classes,
         )
         results.append({"seed": seed, "method": "pointwavelet_umc", **out["final"], "best_oa": out["best"]["oa"], "best_epoch": out["best"]["epoch"]})
 
