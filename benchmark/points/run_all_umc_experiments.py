@@ -1,14 +1,12 @@
 import argparse
 import os
 import time
-from typing import Optional, Tuple
+from typing import Optional
 
 import pandas as pd
 import torch
 import torch.nn.functional as F
-from RGCNN.model import RGCNN_Cls
 from torch_geometric.loader import DataLoader
-from torch_geometric.utils import to_dense_batch
 from utils.datasets import (
     DATASET_INFO,
     build_pre_transform,
@@ -43,77 +41,7 @@ from utils.training import (
 # Model defaults
 # ----------------------------
 
-RGCNN_DEFAULT_FILTERS = [128, 512, 1024, 512, 128]
-RGCNN_DEFAULT_ORDERS = [6, 5, 3, 1, 1]
-RGCNN_DEFAULT_FC = [512, 256]
 METHODS_REQUIRING_PHI = {"naive", "deg", "invdeg", "meandist", "cap", "umc"}
-
-
-def infer_rgcnn_feature_mode(sample) -> Tuple[str, int]:
-    if getattr(sample, "x", None) is None:
-        return "pos", sample.pos.size(1)
-    if sample.x.size(1) == sample.pos.size(1):
-        return "pos+x", sample.pos.size(1) + sample.x.size(1)
-    return "x", sample.x.size(1)
-
-
-class RGCNNClassifierAdapter(torch.nn.Module):
-    def __init__(
-        self,
-        num_points: int,
-        num_classes: int,
-        feature_mode: str,
-        input_dim: int,
-    ):
-        super().__init__()
-        self.vertice = int(num_points)
-        self.feature_mode = feature_mode
-        self.model = RGCNN_Cls(
-            self.vertice,
-            F=RGCNN_DEFAULT_FILTERS,
-            K=RGCNN_DEFAULT_ORDERS,
-            M=RGCNN_DEFAULT_FC + [num_classes],
-            regularization=0.0,
-            dropout=0.0,
-            batch_size=1,
-            eval_frequency=1,
-            input_dim=input_dim,
-            cat_dim=0,
-        )
-
-    def _select_features(self, data):
-        if self.feature_mode == "pos":
-            return data.pos
-        if self.feature_mode == "x":
-            if getattr(data, "x", None) is None:
-                raise ValueError("RGCNN feature_mode=x but data.x is missing.")
-            return data.x
-        if self.feature_mode == "pos+x":
-            if getattr(data, "x", None) is None:
-                raise ValueError("RGCNN feature_mode=pos+x but data.x is missing.")
-            return torch.cat([data.pos, data.x], dim=1)
-        raise ValueError(f"Unknown feature_mode: {self.feature_mode}")
-
-    def forward(self, data, return_features: bool = False):
-        feat = self._select_features(data)
-        batch = getattr(data, "batch", None)
-        if batch is None:
-            batch = torch.zeros(feat.size(0), device=feat.device, dtype=torch.long)
-        feat_dense, _ = to_dense_batch(feat, batch)
-        if feat_dense.size(1) != self.vertice:
-            raise ValueError(
-                f"RGCNN expects {self.vertice} points per graph, got {feat_dense.size(1)}."
-            )
-
-        logits, _ = self.model(feat_dense, None)
-        logp = F.log_softmax(logits, dim=1)
-
-        B, N = feat_dense.size(0), feat_dense.size(1)
-        w = torch.ones(B * N, device=logp.device, dtype=logp.dtype)
-        aux = {"B": B, "N": N, "has_weight_net": False, "uses_weights_for_projection": False}
-        if return_features:
-            return logp, w, aux, logits
-        return logp, w, aux
 
 
 @torch.no_grad()
@@ -202,7 +130,7 @@ def main():
     ap.add_argument("--stability_bias", type=float, default=3.0)
     ap.add_argument("--stability_items", type=int, default=200)
 
-    ap.add_argument("--methods", type=str, default="naive,deg,invdeg,meandist,cap,umc", help="comma-separated methods to run (add rgcnn to include RGCNN)")
+    ap.add_argument("--methods", type=str, default="naive,deg,invdeg,meandist,cap,umc", help="comma-separated methods to run")
     ap.add_argument("--num_workers", type=int, default=0, help="DataLoader workers for train/eval (0 keeps everything on the main process).")
     ap.add_argument("--torch_threads", type=int, default=None, help="Optional cap on torch threads to avoid overusing CPU cores during preprocessing.")
     ap.add_argument("--no_cache_eval", dest="cache_eval", action="store_false", help="Disable caching val/test sets after the first preprocessing pass.")
@@ -316,8 +244,6 @@ def main():
     # ------------------------------------------------------------
     # Experiment specs
     # ------------------------------------------------------------
-    rgcnn_feature_mode = None
-    rgcnn_input_dim = None
 
     def make_model(tag: str, lam_ortho: float):
         # baselines
@@ -334,15 +260,6 @@ def main():
             return UMCClassifier(K=args.K, num_classes=num_classes, use_pos=True, use_density=True).to(device)
         if tag == "cap":
             return ExtraCapacityControl(K=args.K, num_classes=num_classes, use_pos=True, use_density=True).to(device)
-        if tag == "rgcnn":
-            if rgcnn_feature_mode is None or rgcnn_input_dim is None:
-                raise RuntimeError("RGCNN feature spec was not initialized.")
-            return RGCNNClassifierAdapter(
-                num_points=args.num_points,
-                num_classes=num_classes,
-                feature_mode=rgcnn_feature_mode,
-                input_dim=rgcnn_input_dim,
-            ).to(device)
         raise ValueError(tag)
 
     # We'll run:
@@ -355,7 +272,6 @@ def main():
         ("invdeg", None),
         ("meandist", None),
         ("cap", 0.0),
-        ("rgcnn", None),
     ]
     umc_variants = [("umc", lam) for lam in lambda_ortho_grid]
     base_variants = [v for v in base_variants if v[0] in methods_to_run]
@@ -392,11 +308,6 @@ def main():
             transform=test_transform_clean,
             force_reload=False,
         )
-
-        if "rgcnn" in methods_to_run:
-            if len(train_ds_full) == 0:
-                raise RuntimeError("RGCNN requires a non-empty training set to infer feature dimensions.")
-            rgcnn_feature_mode, rgcnn_input_dim = infer_rgcnn_feature_mode(train_ds_full[0])
 
         for seed in seeds:
             seed_everything(seed)
