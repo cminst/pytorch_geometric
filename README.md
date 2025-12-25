@@ -1,8 +1,6 @@
 <p align="center">
-  <img height="150" src="https://via.placeholder.com/400x150/4F8BF9/FFFFFF?text=PyTorch+Geometric+Logo" alt="PyTorch Geometric Logo" />
+  <img height="150" src="https://github.com/user-attachments/assets/1b7f74f8-4236-4a47-baf8-91dc36933869" alt="PyTorch Geometric Logo" />
 </p>
-
-<h1 align="center">PyTorch Geometric</h1>
 
 <p align="center">
   Geometric deep learning with PyG, with UMC, PointWavelet, and LaCore pooling
