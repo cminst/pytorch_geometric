@@ -15,6 +15,7 @@ def increase_openfiles_limit(new_value: int):
     soft_limit, hard_limit = resource.getrlimit(resource.RLIMIT_NOFILE)
     resource.setrlimit(resource.RLIMIT_NOFILE, (new_value, hard_limit))  # Increase soft limit
 
+
 def setup_repo(
     repo_url: str,
     repo_name: str,
@@ -45,6 +46,7 @@ def setup_repo(
 
     if commit_sha:
         subprocess.run(["git", "checkout", commit_sha])
+
 
 def upload_file_to_centralfile(file_path, destination_name, project_name):
     """Uploads a file to a project directory in Centralfile.
@@ -125,7 +127,7 @@ def get_data():
         branch_name=["main"],
         commit_sha=[None],
         # ------------------------- Script parameters
-        dataset=["ModelNet40"],
+        dataset=["ModelNet10"],
         train_mode=["aug"],
         lambda_ortho_grid=[0,0.001,0.1,1,10],
         methods=["naive","deg","invdeg","meandist","cap","umc"],
