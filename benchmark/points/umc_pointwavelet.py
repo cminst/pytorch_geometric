@@ -283,6 +283,13 @@ def parse_args() -> argparse.Namespace:
         default=True,
         help="Enable Weights & Biases logging.",
     )
+    p.add_argument(
+        "--methods",
+        type=str,
+        default="both",
+        choices=["vanilla", "umc", "both"],
+        help="Which method(s) to run: vanilla (PointWavelet), umc, or both.",
+    )
 
     # PointWavelet variant
     # Default to PointWavelet-L (learnable basis). Use --no-wf_learnable to
@@ -316,6 +323,17 @@ def _parse_seeds(s: str) -> List[int]:
     return [int(p) for p in parts]
 
 
+def _resolve_methods(choice: str) -> List[Tuple[str, bool, str]]:
+    if choice == "vanilla":
+        return [("pointwavelet", False, "PointWavelet")]
+    if choice == "umc":
+        return [("pointwavelet_umc", True, "PointWavelet + UMC")]
+    return [
+        ("pointwavelet", False, "PointWavelet"),
+        ("pointwavelet_umc", True, "PointWavelet + UMC"),
+    ]
+
+
 def main() -> None:
     args = parse_args()
     device = _device()
@@ -323,6 +341,7 @@ def main() -> None:
 
     umc_hidden = _parse_int_pair(args.umc_hidden)
     seeds = _parse_seeds(args.seeds)
+    methods = _resolve_methods(args.methods)
 
     train_ds, test_ds = build_datasets(
         args.data_root,
@@ -356,74 +375,47 @@ def main() -> None:
         set_seed(seed)
         print(f"\n=== Seed {seed} ===", flush=True)
 
-        # Method 1: PointWavelet
-        print("\n--- Method: PointWavelet ---", flush=True)
-        run = _init_wandb(bool(args.wandb), args, method="pointwavelet", seed=seed)
-        model = build_model(
-            use_umc=False,
-            wf_learnable=bool(args.wf_learnable),
-            umc_hidden=umc_hidden,
-            umc_knn=args.umc_knn,
-            umc_min_weight=args.umc_min_weight,
-            umc_use_inverse=not bool(args.umc_no_inverse),
-            num_classes=num_classes,
-        )
-        out = train_one(
-            model,
-            train_loader,
-            test_loader,
-            device=device,
-            epochs=args.epochs,
-            lr=args.lr,
-            weight_decay=args.weight_decay,
-            lr_step=args.lr_step,
-            lr_gamma=args.lr_gamma,
-            amp=bool(args.amp),
-            num_classes=num_classes,
-            wandb_run=run,
-        )
-        if run is not None:
-            run.finish()
-        results.append({"seed": seed, "method": "pointwavelet", **out["final"], "best_oa": out["best"]["oa"], "best_epoch": out["best"]["epoch"]})
+        for method_key, use_umc, label in methods:
+            print(f"\n--- Method: {label} ---", flush=True)
+            run = _init_wandb(bool(args.wandb), args, method=method_key, seed=seed)
+            model = build_model(
+                use_umc=use_umc,
+                wf_learnable=bool(args.wf_learnable),
+                umc_hidden=umc_hidden,
+                umc_knn=args.umc_knn,
+                umc_min_weight=args.umc_min_weight,
+                umc_use_inverse=not bool(args.umc_no_inverse),
+                num_classes=num_classes,
+            )
+            out = train_one(
+                model,
+                train_loader,
+                test_loader,
+                device=device,
+                epochs=args.epochs,
+                lr=args.lr,
+                weight_decay=args.weight_decay,
+                lr_step=args.lr_step,
+                lr_gamma=args.lr_gamma,
+                amp=bool(args.amp),
+                num_classes=num_classes,
+                wandb_run=run,
+            )
+            if run is not None:
+                run.finish()
+            results.append(
+                {
+                    "seed": seed,
+                    "method": method_key,
+                    **out["final"],
+                    "best_oa": out["best"]["oa"],
+                    "best_epoch": out["best"]["epoch"],
+                }
+            )
 
-        # Free memory between runs
-        del model
-        if device.type == "cuda":
-            torch.cuda.empty_cache()
-
-        # Method 2: PointWavelet + UMC
-        print("\n--- Method: PointWavelet + UMC ---", flush=True)
-        run = _init_wandb(bool(args.wandb), args, method="pointwavelet_umc", seed=seed)
-        model = build_model(
-            use_umc=True,
-            wf_learnable=bool(args.wf_learnable),
-            umc_hidden=umc_hidden,
-            umc_knn=args.umc_knn,
-            umc_min_weight=args.umc_min_weight,
-            umc_use_inverse=not bool(args.umc_no_inverse),
-            num_classes=num_classes,
-        )
-        out = train_one(
-            model,
-            train_loader,
-            test_loader,
-            device=device,
-            epochs=args.epochs,
-            lr=args.lr,
-            weight_decay=args.weight_decay,
-            lr_step=args.lr_step,
-            lr_gamma=args.lr_gamma,
-            amp=bool(args.amp),
-            num_classes=num_classes,
-            wandb_run=run,
-        )
-        if run is not None:
-            run.finish()
-        results.append({"seed": seed, "method": "pointwavelet_umc", **out["final"], "best_oa": out["best"]["oa"], "best_epoch": out["best"]["epoch"]})
-
-        del model
-        if device.type == "cuda":
-            torch.cuda.empty_cache()
+            del model
+            if device.type == "cuda":
+                torch.cuda.empty_cache()
 
     # Write results
     os.makedirs(os.path.dirname(args.out_csv) or ".", exist_ok=True)
@@ -436,7 +428,7 @@ def main() -> None:
 
     print(f"\nSaved results to {args.out_csv}", flush=True)
     # Also print a short summary
-    for m in ["pointwavelet", "pointwavelet_umc"]:
+    for m, _, _ in methods:
         vals = [r["oa"] for r in results if r["method"] == m]
         if vals:
             mean = float(np.mean(vals))
