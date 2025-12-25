@@ -132,7 +132,15 @@ def _collect_umc_stats(
         return {}
 
     acc = {
-        name: {"w_var": 0.0, "corr_w_meandist": 0.0, "corr_w_invmeandist": 0.0, "count": 0}
+        name: {
+            "w_var": 0.0,
+            "w_std": 0.0,
+            "corr_w_meandist": 0.0,
+            "corr_w_invmeandist": 0.0,
+            "w_min": float("inf"),
+            "w_max": float("-inf"),
+            "count": 0,
+        }
         for name in layers
     }
     model.eval()
@@ -150,35 +158,53 @@ def _collect_umc_stats(
             if w.numel() == 0:
                 continue
             w_var = w.var(dim=1, unbiased=False)
+            w_std = w.std(dim=1, unbiased=False)
+            w_min = w.min(dim=1).values
+            w_max = w.max(dim=1).values
             corr_md = _batch_pearson_corr(w, md)
             corr_inv = _batch_pearson_corr(w, 1.0 / (md + 1e-6))
 
             acc[name]["w_var"] += float(w_var.sum().item())
+            acc[name]["w_std"] += float(w_std.sum().item())
             acc[name]["corr_w_meandist"] += float(corr_md.sum().item())
             acc[name]["corr_w_invmeandist"] += float(corr_inv.sum().item())
+            acc[name]["w_min"] = float(min(acc[name]["w_min"], w_min.min().item()))
+            acc[name]["w_max"] = float(max(acc[name]["w_max"], w_max.max().item()))
             acc[name]["count"] += int(w.shape[0])
 
     out: Dict[str, float] = {}
     total = 0
     total_w_var = 0.0
+    total_w_std = 0.0
     total_corr_md = 0.0
     total_corr_inv = 0.0
+    total_w_min = float("inf")
+    total_w_max = float("-inf")
     for name, stats in acc.items():
         count = stats["count"]
         if count <= 0:
             continue
         out[f"{name}_w_var"] = stats["w_var"] / count
+        out[f"{name}_w_std"] = stats["w_std"] / count
         out[f"{name}_corr_w_meandist"] = stats["corr_w_meandist"] / count
         out[f"{name}_corr_w_invmeandist"] = stats["corr_w_invmeandist"] / count
+        out[f"{name}_w_min"] = stats["w_min"]
+        out[f"{name}_w_max"] = stats["w_max"]
         total += count
         total_w_var += stats["w_var"]
+        total_w_std += stats["w_std"]
         total_corr_md += stats["corr_w_meandist"]
         total_corr_inv += stats["corr_w_invmeandist"]
+        total_w_min = min(total_w_min, stats["w_min"])
+        total_w_max = max(total_w_max, stats["w_max"])
 
     if total > 0:
         out["umc_w_var"] = total_w_var / total
+        out["umc_w_std"] = total_w_std / total
         out["umc_corr_w_meandist"] = total_corr_md / total
         out["umc_corr_w_invmeandist"] = total_corr_inv / total
+        out["umc_w_min"] = total_w_min
+        out["umc_w_max"] = total_w_max
     return out
 
 
@@ -419,7 +445,12 @@ def train_one(
             f"test_OA={metrics['oa']*100:.2f} | test_mAcc={metrics['macc']*100:.2f}"
         )
         if "umc_w_var" in umc_stats:
-            msg += f" | umc_w_var={umc_stats['umc_w_var']:.4f}"
+            msg += (
+                f" | umc_w_var={umc_stats['umc_w_var']:.6f}"
+                f" | umc_w_std={umc_stats.get('umc_w_std', 0.0):.6f}"
+                f" | umc_w_min={umc_stats.get('umc_w_min', 0.0):.6f}"
+                f" | umc_w_max={umc_stats.get('umc_w_max', 0.0):.6f}"
+            )
         if stress_acc is not None:
             msg += f" | stress_OA(beta={stress_beta:.2f})={stress_acc*100:.2f}"
         print(msg, flush=True)
