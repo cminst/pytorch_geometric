@@ -258,37 +258,37 @@ def train_one(
 
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser()
-    p.add_argument("--data_root", type=str, default="data", help="Root directory for torch_geometric ModelNet")
+    p.add_argument("--data_root", type=str, default="data", help="Root directory for torch_geometric ModelNet (default: data)")
     p.add_argument(
         "--modelnet",
         type=str,
         default="40",
         choices=["10", "40"],
-        help="Which dataset split to use: ModelNet10 or ModelNet40.",
+        help="Which dataset split to use: ModelNet10 or ModelNet40. (default: 40)",
     )
     p.add_argument("--force_reload", action="store_true", help="Force reprocessing the dataset")
-    p.add_argument("--num_points", type=int, default=1024)
-    p.add_argument("--batch_size", type=int, default=16)
-    p.add_argument("--num_workers", type=int, default=4)
-    p.add_argument("--epochs", type=int, default=200)
-    p.add_argument("--lr", type=float, default=1e-3)
-    p.add_argument("--weight_decay", type=float, default=1e-4)
-    p.add_argument("--lr_step", type=int, default=20)
-    p.add_argument("--lr_gamma", type=float, default=0.7)
+    p.add_argument("--num_points", type=int, default=1024, help="Number of points to sample (default: 1024)")
+    p.add_argument("--batch_size", type=int, default=16, help="Batch size for DataLoaders (default: 16)")
+    p.add_argument("--num_workers", type=int, default=4, help="Number of workers for DataLoaders (default: 4)")
+    p.add_argument("--epochs", type=int, default=200, help="Number of training epochs (default: 200)")
+    p.add_argument("--lr", type=float, default=1e-3, help="Learning rate (default: 1e-3)")
+    p.add_argument("--weight_decay", type=float, default=1e-4, help="Weight decay (default: 1e-4)")
+    p.add_argument("--lr_step", type=int, default=20, help="Learning rate decay step (default: 20)")
+    p.add_argument("--lr_gamma", type=float, default=0.7, help="Learning rate decay gamma (default: 0.7)")
     p.add_argument("--amp", action="store_true", help="Use CUDA AMP (fp16) if available")
-    p.add_argument("--seeds", type=str, default="0", help="Comma-separated seeds, e.g. '0,1,2,3'")
+    p.add_argument("--seeds", type=str, default="0", help="Comma-separated seeds, e.g. '0,1,2,3' (default: 0)")
     p.add_argument(
         "--wandb",
         action=argparse.BooleanOptionalAction,
         default=True,
-        help="Enable Weights & Biases logging.",
+        help="Enable Weights & Biases logging. (default: True)",
     )
     p.add_argument(
         "--methods",
         type=str,
         default="both",
         choices=["vanilla", "umc", "both"],
-        help="Which method(s) to run: vanilla (PointWavelet), umc, or both.",
+        help="Which method(s) to run: vanilla (PointWavelet), umc, or both. (default: both)",
     )
 
     # PointWavelet variant
@@ -298,16 +298,16 @@ def parse_args() -> argparse.Namespace:
         "--wf_learnable",
         action=argparse.BooleanOptionalAction,
         default=True,
-        help="Use PointWavelet-L (learnable spectral basis).",
+        help="Use PointWavelet-L (learnable spectral basis). (default: True)",
     )
 
     # UMC settings
-    p.add_argument("--umc_hidden", type=str, default="32,32", help="Hidden widths for UMC MLP, e.g. '32,32'")
-    p.add_argument("--umc_knn", type=int, default=8)
-    p.add_argument("--umc_min_weight", type=float, default=1e-3)
+    p.add_argument("--umc_hidden", type=str, default="128,32", help="Hidden widths for UMC MLP (default: 128,32)")
+    p.add_argument("--umc_knn", type=int, default=20, help="k for UMC k-NN graph (default: 20)")
+    p.add_argument("--umc_min_weight", type=float, default=1e-4, help="Minimum weight for UMC (default: 1e-4)")
     p.add_argument("--umc_no_inverse", action="store_true", help="Disable the W^{-1} factor in reconstruction")
 
-    p.add_argument("--out_csv", type=str, default="pointwavelet_umc_results.csv")
+    p.add_argument("--out_csv", type=str, default="pointwavelet_umc_results.csv", help="Output CSV file name (default: pointwavelet_umc_results.csv)")
     return p.parse_args()
 
 
