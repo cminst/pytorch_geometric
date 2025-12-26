@@ -13,7 +13,18 @@ Evaluation scripts for various methods on the ModelNet10 dataset:
 From `./`, train and save a checkpoint:
 
 ```
-python3 umc_pointwavelet.py --data_root ../data/ModelNet10/ --modelnet 10 --methods umc --save_ckpt --ckpt_dir checkpoints
+python3 umc_pointwavelet.py \
+    --data_root ../data/ModelNet10/ \
+    --num_workers 4 \
+    --wf_learnable \
+    --modelnet 10 \
+    --lr 1e-4 \
+    --methods umc \
+    --epochs 100 \
+    --stress_beta 5 \
+    --seeds 1 \
+    --save_ckpt \
+    --ckpt_dir checkpoints
 ```
 
 Evaluate stress accuracy across multiple betas using a saved checkpoint:
