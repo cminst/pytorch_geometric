@@ -344,8 +344,8 @@ def build_stress_loader(
     stress_transform = Compose(
         [
             SamplePoints(dense_points),
-            IrregularResample(num_points=num_points, bias_strength=bias_strength),
             NormalizeScale(),
+            IrregularResample(num_points=num_points, bias_strength=bias_strength),
         ]
     )
     stress_ds = ModelNet(

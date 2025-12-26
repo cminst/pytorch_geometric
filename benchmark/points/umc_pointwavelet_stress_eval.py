@@ -71,7 +71,7 @@ def _get_debug_base_sample(
 ) -> object:
     def _run():
         _seed_rng(seed)
-        base_transform = Compose([SamplePoints(dense_points)])
+        base_transform = Compose([SamplePoints(dense_points), NormalizeScale()])
         ds = ModelNet(
             root=root,
             name=modelnet,
@@ -93,12 +93,7 @@ def _apply_debug_stress(
 ) -> object:
     def _run():
         _seed_rng(seed)
-        transform = Compose(
-            [
-                IrregularResample(num_points=num_points, bias_strength=beta),
-                NormalizeScale(),
-            ]
-        )
+        transform = Compose([IrregularResample(num_points=num_points, bias_strength=beta)])
         return transform(copy.deepcopy(data))
 
     return _preserve_rng_state(_run)
