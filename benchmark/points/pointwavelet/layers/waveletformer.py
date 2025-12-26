@@ -112,6 +112,7 @@ class WaveletFormer(nn.Module):
         super().__init__()
         self.cfg = cfg
         self.last_umc: Optional[dict[str, torch.Tensor]] = None
+        self.last_umc_raw: Optional[dict[str, torch.Tensor]] = None
         if cfg.scales is None:
             self.scales = _default_scales(cfg.J)
         else:
@@ -209,6 +210,10 @@ class WaveletFormer(nn.Module):
             # Normalize per patch so sum(w)=n.
             w = w * (float(n) / torch.clamp(w.sum(dim=-1, keepdim=True), min=self.cfg.eps))
             w = torch.clamp(w, min=self.cfg.umc_min_weight)
+            self.last_umc_raw = {
+                "w": w,
+                "mean_dist": md,
+            }
             self.last_umc = {
                 "w": w.detach(),
                 "mean_dist": md.detach(),
@@ -216,6 +221,7 @@ class WaveletFormer(nn.Module):
             x = x * w.unsqueeze(-1)
         else:
             self.last_umc = None
+            self.last_umc_raw = None
 
         # Compute spectral transform of (possibly reweighted) input once.
         x_freq = _einsum_ut_x(U, x)  # (P,n,C)

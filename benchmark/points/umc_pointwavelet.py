@@ -218,6 +218,29 @@ def _collect_umc_stats(
     return out
 
 
+def _umc_corr_reg_loss(model: PointWaveletClassifier) -> torch.Tensor:
+    layers = {
+        "sa1": model.sa1.wf,
+        "sa2": model.sa2.wf,
+        "sa3": model.sa3.wf,
+        "sa4": model.sa4.wf,
+    }
+    corr_terms: List[torch.Tensor] = []
+    for wf in layers.values():
+        umc = getattr(wf, "last_umc_raw", None)
+        if not umc:
+            continue
+        w = umc.get("w")
+        md = umc.get("mean_dist")
+        if w is None or md is None or w.numel() == 0:
+            continue
+        corr = _batch_pearson_corr(w, md)
+        corr_terms.append(corr.mean())
+    if not corr_terms:
+        return torch.zeros((), device=next(model.parameters()).device)
+    return torch.stack(corr_terms).mean()
+
+
 @torch.no_grad()
 def _eval_stress_accuracy(
     model: torch.nn.Module,
@@ -391,6 +414,7 @@ def train_one(
     stress_interval: int = 0,
     stress_beta: float = 0.0,
     stress_seed: Optional[int] = None,
+    umc_corr_reg: float = 0.0,
 ) -> dict:
     model = model.to(device)
 
@@ -418,7 +442,8 @@ def train_one(
                 logits = model(xyz)
                 cls_loss = F.cross_entropy(logits, y)
                 reg_loss = model.regularization_loss()
-                loss = cls_loss + reg_loss
+                corr_reg_loss = _umc_corr_reg_loss(model) if (has_umc and umc_corr_reg > 0) else 0.0
+                loss = cls_loss + reg_loss + (umc_corr_reg * corr_reg_loss)
 
             scaler.scale(loss).backward()
             scaler.step(opt)
@@ -531,6 +556,12 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--umc_knn", type=int, default=20, help="k for UMC k-NN graph (default: 20)")
     p.add_argument("--umc_min_weight", type=float, default=1e-4, help="Minimum weight for UMC (default: 1e-4)")
     p.add_argument("--umc_no_inverse", action="store_true", help="Disable the W^{-1} factor in reconstruction")
+    p.add_argument(
+        "--umc_corr_reg",
+        type=float,
+        default=0.01,
+        help="Weight for corr(w, mean_dist) regularizer; positive encourages negative correlation. (default: 0.01)",
+    )
     p.add_argument("--save_ckpt", action="store_true", help="Save model checkpoint after training")
     p.add_argument("--ckpt_dir", type=str, default="checkpoints", help="Directory to save checkpoints (default: checkpoints)")
 
@@ -651,6 +682,7 @@ def main() -> None:
                 stress_interval=max(int(args.stress_interval), 0),
                 stress_beta=float(args.stress_beta),
                 stress_seed=seed + int(round(1000 * float(args.stress_beta))),
+                umc_corr_reg=float(args.umc_corr_reg),
             )
             if run is not None:
                 run.finish()
