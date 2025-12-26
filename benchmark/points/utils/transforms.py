@@ -76,7 +76,7 @@ class IrregularResample(BaseTransform):
     """Resample points with optional exponential bias along a random focus direction.
 
     - bias_strength = 0 => uniform downsample/upsample to num_points
-    - bias_strength > 0 => sample without replacement using softmax weights exp(bias * proj)
+    - bias_strength > 0 => sample with replacement using softmax weights exp(bias * proj)
 
     IMPORTANT: wipes edge_index/phi/deg so downstream transforms recompute them.
     """
@@ -96,7 +96,7 @@ class IrregularResample(BaseTransform):
             proj = proj - proj.max()             # stability
             weights = torch.exp(self.bias * proj)
             weights = weights / (weights.sum() + 1e-12)
-            idx = torch.multinomial(weights, self.num_points, replacement=False)
+            idx = torch.multinomial(weights, self.num_points, replacement=True)
             data.pos = pos[idx]
         else:
             if N_curr >= self.num_points:
