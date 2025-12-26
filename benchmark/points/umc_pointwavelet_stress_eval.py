@@ -22,6 +22,15 @@ def _parse_betas(s: str) -> List[float]:
     return [float(p) for p in parts]
 
 
+def _parse_seeds(s: Optional[str]) -> List[int]:
+    if s is None:
+        return []
+    parts = [p.strip() for p in s.split(",") if p.strip()]
+    if not parts:
+        return []
+    return [int(p) for p in parts]
+
+
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser()
     p.add_argument("--ckpt", type=str, required=True, help="Path to checkpoint saved by umc_pointwavelet.py")
@@ -31,7 +40,12 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--stress_dense_points", type=int, default=2048, help="Dense points before stress resample (default: 2048)")
     p.add_argument("--modelnet", type=str, default=None, help="Override ModelNet split (10 or 40). Defaults to ckpt meta.")
     p.add_argument("--num_points", type=int, default=None, help="Override num_points. Defaults to ckpt meta.")
-    p.add_argument("--seed", type=int, default=None, help="Override stress seed base. Defaults to ckpt meta.")
+    p.add_argument(
+        "--seeds",
+        type=str,
+        default=None,
+        help="Comma-separated stress seeds. Defaults to ckpt meta seed.",
+    )
     p.add_argument("--force_reload", action="store_true", help="Force reprocessing the dataset")
     p.add_argument("--debug", action="store_true", help="Save 3D scatter images for the first test sample per beta")
     p.add_argument("--debug_dir", type=str, default="stress_debug", help="Directory for debug images (default: stress_debug)")
@@ -127,13 +141,19 @@ def main() -> None:
 
     modelnet = args.modelnet if args.modelnet is not None else str(meta.get("modelnet", "40"))
     num_points = args.num_points if args.num_points is not None else int(meta.get("num_points", 1024))
-    seed = args.seed if args.seed is not None else int(meta.get("seed", 0))
+    seeds = _parse_seeds(args.seeds)
+    if not seeds:
+        seeds = [int(meta.get("seed", 0))]
 
     betas = _parse_betas(args.betas)
     print(f"Loaded {args.ckpt}", flush=True)
-    print(f"ModelNet{modelnet} | num_points={num_points} | base_seed={seed}", flush=True)
+    print(
+        f"ModelNet{modelnet} | num_points={num_points} | seeds={','.join(str(s) for s in seeds)}",
+        flush=True,
+    )
 
     debug_sample = None
+    debug_seed_base = seeds[0]
     if args.debug:
         os.makedirs(args.debug_dir, exist_ok=True)
         debug_sample = _get_debug_base_sample(
@@ -141,7 +161,7 @@ def main() -> None:
             modelnet=str(modelnet),
             dense_points=args.stress_dense_points,
             force_reload=bool(args.force_reload),
-            seed=seed,
+            seed=debug_seed_base,
         )
 
     for beta in betas:
@@ -155,11 +175,19 @@ def main() -> None:
             force_reload=bool(args.force_reload),
             device=device,
         )
-        eval_seed = seed + int(round(1000 * float(beta)))
-        acc = _eval_stress_accuracy(model, stress_loader, device=device, seed=eval_seed)
-        print(f"beta={beta:.2f} | stress_OA={acc*100:.2f}", flush=True)
+        accs = []
+        for seed in seeds:
+            eval_seed = seed + int(round(1000 * float(beta)))
+            acc = _eval_stress_accuracy(model, stress_loader, device=device, seed=eval_seed)
+            accs.append(acc)
+        mean = float(np.mean(accs)) if accs else 0.0
+        std = float(np.std(accs)) if accs else 0.0
+        print(
+            f"beta={beta:.2f} | stress_OA={mean*100:.2f} ± {std*100:.2f} (n={len(accs)})",
+            flush=True,
+        )
         if args.debug and debug_sample is not None:
-            debug_seed = seed + int(round(1000 * float(beta)))
+            debug_seed = debug_seed_base + int(round(1000 * float(beta)))
             stressed = _apply_debug_stress(debug_sample, num_points=num_points, beta=float(beta), seed=debug_seed)
             out_path = os.path.join(args.debug_dir, f"stress_beta_{_beta_tag(beta)}.png")
             _save_debug_plot(stressed, out_path, title=f"beta={beta:.2f}")
