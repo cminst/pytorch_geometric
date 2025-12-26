@@ -8,3 +8,17 @@ In particular, we take care to avoid to perform hyperparameter and model selecti
 ```
 $ pip install -e .
 ```
+
+## PointWavelet UMC Examples
+
+From `benchmark/points`, train and save a checkpoint:
+
+```
+python3 umc_pointwavelet.py --data_root ../data/ModelNet10/ --modelnet 10 --methods umc --save_ckpt --ckpt_dir checkpoints
+```
+
+Evaluate stress accuracy across multiple betas using a saved checkpoint:
+
+```
+python3 umc_pointwavelet_stress_eval.py --ckpt checkpoints/pointwavelet_umc_modelnet10_n1024_seed0.pt --betas 1,2,3,4 --data_root ../data/ModelNet10
+```

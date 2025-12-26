@@ -22,6 +22,7 @@ import argparse
 import csv
 import os
 import random
+from dataclasses import asdict
 from typing import Dict, List, Optional, Tuple
 
 import numpy as np
@@ -49,6 +50,15 @@ def _wandb_run_name(wf_learnable: bool, method: str) -> str:
     if method == "pointwavelet_umc":
         return f"{base}-UMC"
     return base
+
+
+def _save_checkpoint(path: str, model: PointWaveletClassifier, meta: dict) -> None:
+    payload = {
+        "model_state": model.state_dict(),
+        "cfg": asdict(model.cfg),
+        "meta": meta,
+    }
+    torch.save(payload, path)
 
 
 def _init_wandb(enabled: bool, args: argparse.Namespace, method: str, seed: int):
@@ -521,6 +531,8 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--umc_knn", type=int, default=20, help="k for UMC k-NN graph (default: 20)")
     p.add_argument("--umc_min_weight", type=float, default=1e-4, help="Minimum weight for UMC (default: 1e-4)")
     p.add_argument("--umc_no_inverse", action="store_true", help="Disable the W^{-1} factor in reconstruction")
+    p.add_argument("--save_ckpt", action="store_true", help="Save model checkpoint after training")
+    p.add_argument("--ckpt_dir", type=str, default="checkpoints", help="Directory to save checkpoints (default: checkpoints)")
 
     # UMC diagnostics / stress eval
     p.add_argument("--umc_stats_batches", type=int, default=10, help="Batches to estimate UMC stats each epoch (default: 10)")
@@ -651,6 +663,27 @@ def main() -> None:
                     "best_epoch": out["best"]["epoch"],
                 }
             )
+            if args.save_ckpt:
+                os.makedirs(args.ckpt_dir, exist_ok=True)
+                ckpt_name = f"{method_key}_modelnet{args.modelnet}_n{args.num_points}_seed{seed}.pt"
+                ckpt_path = os.path.join(args.ckpt_dir, ckpt_name)
+                meta = {
+                    "seed": seed,
+                    "method": method_key,
+                    "modelnet": str(args.modelnet),
+                    "num_points": int(args.num_points),
+                    "num_classes": int(num_classes),
+                    "wf_learnable": bool(args.wf_learnable),
+                    "umc_hidden": list(umc_hidden),
+                    "umc_knn": int(args.umc_knn),
+                    "umc_min_weight": float(args.umc_min_weight),
+                    "umc_use_inverse": not bool(args.umc_no_inverse),
+                    "epochs": int(args.epochs),
+                    "final": out["final"],
+                    "best": out["best"],
+                }
+                _save_checkpoint(ckpt_path, model, meta)
+                print(f"Saved checkpoint to {ckpt_path}", flush=True)
 
             del model
             if device.type == "cuda":
