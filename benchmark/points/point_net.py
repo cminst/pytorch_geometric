@@ -70,7 +70,7 @@ class Net(torch.nn.Module):
         return F.log_softmax(x, dim=-1)
 
 
-train_dataset, test_dataset = get_modelnet_dataset(num_points=1024)
+train_dataset, test_dataset = get_modelnet_dataset(num_points=1024, variant='40')
 model = Net(train_dataset.num_classes)
 run(train_dataset, test_dataset, model, args.epochs, args.batch_size, args.lr,
     args.lr_decay_factor, args.lr_decay_step_size, args.weight_decay,

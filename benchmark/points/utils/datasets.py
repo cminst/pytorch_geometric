@@ -4,8 +4,8 @@ import copy
 import os.path as osp
 from typing import Callable, Optional
 
-import torch_geometric.transforms as T
 import torch
+import torch_geometric.transforms as T
 from torch_geometric.data import Batch
 from torch_geometric.datasets import ModelNet
 from torch_geometric.loader import DataLoader
@@ -238,15 +238,24 @@ def make_loaders(train_ds, val_ds, test_ds, batch_size: int, seed: int, drop_las
     return train_loader, val_loader, test_loader
 
 
-def get_modelnet_dataset(num_points):
-    name = 'ModelNet10'
+def get_modelnet_dataset(num_points, variant='10'):
+    """Get ModelNet dataset with specified number of points and variant.
+
+    Args:
+        num_points (int): Number of points to sample.
+        variant (str): ModelNet variant ('10' or '40').
+
+    Returns:
+        tuple: Train and test datasets.
+    """
+    name = f'ModelNet{variant}'
     path = osp.join(osp.dirname(osp.realpath(__file__)), '..', 'data', name)
     pre_transform = T.NormalizeScale()
     transform = T.SamplePoints(num_points)
 
-    train_dataset = ModelNet(path, name='10', train=True, transform=transform,
+    train_dataset = ModelNet(path, name=variant, train=True, transform=transform,
                              pre_transform=pre_transform)
-    test_dataset = ModelNet(path, name='10', train=False, transform=transform,
+    test_dataset = ModelNet(path, name=variant, train=False, transform=transform,
                             pre_transform=pre_transform)
 
     return train_dataset, test_dataset
