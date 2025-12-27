@@ -116,8 +116,8 @@ class IrregularResample(BaseTransform):
             weights = torch.exp(self.bias * proj)
             weights = weights / weights.sum()
             
-            # 4. Sample without replacement to get exactly num_points
-            idx = torch.multinomial(weights, self.num_points, replacement=False)
+            # 4. Sample with replacement to get exactly num_points
+            idx = torch.multinomial(weights, self.num_points, replacement=True)
             new_pos = pos[idx]
             
             data.pos = new_pos

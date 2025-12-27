@@ -23,7 +23,7 @@ import csv
 import os
 import random
 from dataclasses import asdict
-from typing import Iterable, List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 import torch
@@ -34,7 +34,7 @@ from torch_geometric.datasets import ModelNet
 from torch_geometric.transforms import Compose, NormalizeScale, SamplePoints
 
 from pointwavelet import PointWaveletClassifier, PointWaveletClsConfig
-from utils.transforms import PointJitter, PointMLPAffine
+from utils.transforms import IrregularResample, PointJitter, PointMLPAffine
 
 
 def _device() -> torch.device:
@@ -50,6 +50,15 @@ def _wandb_run_name(wf_learnable: bool, method: str) -> str:
     if method == "pointwavelet_umc":
         return f"{base}-UMC"
     return base
+
+
+def _save_checkpoint(path: str, model: PointWaveletClassifier, meta: dict) -> None:
+    payload = {
+        "model_state": model.state_dict(),
+        "cfg": asdict(model.cfg),
+        "meta": meta,
+    }
+    torch.save(payload, path)
 
 
 def _init_wandb(enabled: bool, args: argparse.Namespace, method: str, seed: int):
@@ -83,6 +92,177 @@ def set_seed(seed: int) -> None:
     # Determinism (can be slower; toggle if you want max speed)
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = False
+
+
+def _seed_rng(seed: int) -> None:
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
+
+
+def _preserve_rng_state(fn):
+    state = {
+        "py": random.getstate(),
+        "np": np.random.get_state(),
+        "torch": torch.random.get_rng_state(),
+        "cuda": torch.cuda.get_rng_state_all() if torch.cuda.is_available() else None,
+    }
+    try:
+        return fn()
+    finally:
+        random.setstate(state["py"])
+        np.random.set_state(state["np"])
+        torch.random.set_rng_state(state["torch"])
+        if state["cuda"] is not None:
+            torch.cuda.set_rng_state_all(state["cuda"])
+
+
+def _batch_pearson_corr(a: torch.Tensor, b: torch.Tensor, eps: float = 1e-12) -> torch.Tensor:
+    a = a - a.mean(dim=1, keepdim=True)
+    b = b - b.mean(dim=1, keepdim=True)
+    denom = (a.norm(dim=1) * b.norm(dim=1)).clamp_min(eps)
+    return (a * b).sum(dim=1) / denom
+
+
+@torch.no_grad()
+def _collect_umc_stats(
+    model: PointWaveletClassifier,
+    loader: DataLoader,
+    device: torch.device,
+    max_batches: int = 10,
+) -> Dict[str, float]:
+    layers = {
+        "sa1": model.sa1.wf,
+        "sa2": model.sa2.wf,
+        "sa3": model.sa3.wf,
+        "sa4": model.sa4.wf,
+    }
+    if not any(getattr(layer, "umc", None) is not None for layer in layers.values()):
+        return {}
+
+    acc = {
+        name: {
+            "w_var": 0.0,
+            "w_std": 0.0,
+            "corr_w_meandist": 0.0,
+            "corr_w_invmeandist": 0.0,
+            "w_min": float("inf"),
+            "w_max": float("-inf"),
+            "count": 0,
+        }
+        for name in layers
+    }
+    model.eval()
+    for b_idx, (xyz, _) in enumerate(loader):
+        if b_idx >= max_batches:
+            break
+        xyz = xyz.to(device)
+        _ = model(xyz)
+        for name, wf in layers.items():
+            umc = getattr(wf, "last_umc", None)
+            if not umc:
+                continue
+            w = umc["w"]
+            md = umc["mean_dist"]
+            if w.numel() == 0:
+                continue
+            w_var = w.var(dim=1, unbiased=False)
+            w_std = w.std(dim=1, unbiased=False)
+            w_min = w.min(dim=1).values
+            w_max = w.max(dim=1).values
+            corr_md = _batch_pearson_corr(w, md)
+            corr_inv = _batch_pearson_corr(w, 1.0 / (md + 1e-6))
+
+            acc[name]["w_var"] += float(w_var.sum().item())
+            acc[name]["w_std"] += float(w_std.sum().item())
+            acc[name]["corr_w_meandist"] += float(corr_md.sum().item())
+            acc[name]["corr_w_invmeandist"] += float(corr_inv.sum().item())
+            acc[name]["w_min"] = float(min(acc[name]["w_min"], w_min.min().item()))
+            acc[name]["w_max"] = float(max(acc[name]["w_max"], w_max.max().item()))
+            acc[name]["count"] += int(w.shape[0])
+
+    out: Dict[str, float] = {}
+    total = 0
+    total_w_var = 0.0
+    total_w_std = 0.0
+    total_corr_md = 0.0
+    total_corr_inv = 0.0
+    total_w_min = float("inf")
+    total_w_max = float("-inf")
+    for name, stats in acc.items():
+        count = stats["count"]
+        if count <= 0:
+            continue
+        out[f"{name}_w_var"] = stats["w_var"] / count
+        out[f"{name}_w_std"] = stats["w_std"] / count
+        out[f"{name}_corr_w_meandist"] = stats["corr_w_meandist"] / count
+        out[f"{name}_corr_w_invmeandist"] = stats["corr_w_invmeandist"] / count
+        out[f"{name}_w_min"] = stats["w_min"]
+        out[f"{name}_w_max"] = stats["w_max"]
+        total += count
+        total_w_var += stats["w_var"]
+        total_w_std += stats["w_std"]
+        total_corr_md += stats["corr_w_meandist"]
+        total_corr_inv += stats["corr_w_invmeandist"]
+        total_w_min = min(total_w_min, stats["w_min"])
+        total_w_max = max(total_w_max, stats["w_max"])
+
+    if total > 0:
+        out["umc_w_var"] = total_w_var / total
+        out["umc_w_std"] = total_w_std / total
+        out["umc_corr_w_meandist"] = total_corr_md / total
+        out["umc_corr_w_invmeandist"] = total_corr_inv / total
+        out["umc_w_min"] = total_w_min
+        out["umc_w_max"] = total_w_max
+    return out
+
+
+def _umc_corr_reg_loss(model: PointWaveletClassifier) -> torch.Tensor:
+    layers = {
+        "sa1": model.sa1.wf,
+        "sa2": model.sa2.wf,
+        "sa3": model.sa3.wf,
+        "sa4": model.sa4.wf,
+    }
+    corr_terms: List[torch.Tensor] = []
+    for wf in layers.values():
+        umc = getattr(wf, "last_umc_raw", None)
+        if not umc:
+            continue
+        w = umc.get("w")
+        md = umc.get("mean_dist")
+        if w is None or md is None or w.numel() == 0:
+            continue
+        corr = _batch_pearson_corr(w, md)
+        corr_terms.append(corr.mean())
+    if not corr_terms:
+        return torch.zeros((), device=next(model.parameters()).device)
+    return torch.stack(corr_terms).mean()
+
+
+@torch.no_grad()
+def _eval_stress_accuracy(
+    model: torch.nn.Module,
+    loader: DataLoader,
+    device: torch.device,
+    seed: int,
+) -> float:
+    def _run():
+        _seed_rng(seed)
+        model.eval()
+        correct = 0
+        total = 0
+        for xyz, y in loader:
+            xyz = xyz.to(device)
+            y = y.to(device)
+            logits = model(xyz)
+            pred = logits.argmax(dim=-1)
+            correct += int((pred == y).sum().item())
+            total += int(y.numel())
+        return correct / max(total, 1)
+
+    return float(_preserve_rng_state(_run))
 
 
 @torch.no_grad()
@@ -151,6 +331,42 @@ def build_datasets(root: str, num_points: int, force_reload: bool, modelnet: str
     return train_ds, test_ds
 
 
+def build_stress_loader(
+    root: str,
+    num_points: int,
+    dense_points: int,
+    modelnet: str,
+    bias_strength: float,
+    batch_size: int,
+    force_reload: bool,
+    device: torch.device,
+) -> DataLoader:
+    stress_transform = Compose(
+        [
+            SamplePoints(dense_points),
+            NormalizeScale(),
+            IrregularResample(num_points=num_points, bias_strength=bias_strength),
+        ]
+    )
+    stress_ds = ModelNet(
+        root=root,
+        name=modelnet,
+        train=False,
+        pre_transform=None,
+        transform=stress_transform,
+        force_reload=force_reload,
+    )
+    return DataLoader(
+        stress_ds,
+        batch_size=batch_size,
+        shuffle=False,
+        num_workers=0,
+        collate_fn=collate_points,
+        drop_last=False,
+        pin_memory=(device.type == "cuda"),
+    )
+
+
 def build_model(
     use_umc: bool,
     wf_learnable: bool,
@@ -193,6 +409,12 @@ def train_one(
     amp: bool,
     num_classes: int,
     wandb_run: Optional[object] = None,
+    umc_stats_batches: int = 10,
+    stress_loader: Optional[DataLoader] = None,
+    stress_interval: int = 0,
+    stress_beta: float = 0.0,
+    stress_seed: Optional[int] = None,
+    umc_corr_reg: float = 0.0,
 ) -> dict:
     model = model.to(device)
 
@@ -203,6 +425,7 @@ def train_one(
     scaler = torch.amp.GradScaler("cuda", enabled=use_amp)
 
     best = {"oa": 0.0, "macc": 0.0, "epoch": 0}
+    has_umc = bool(getattr(model.cfg, "wf_use_umc", False))
 
     for epoch in range(1, epochs + 1):
         model.train()
@@ -219,7 +442,8 @@ def train_one(
                 logits = model(xyz)
                 cls_loss = F.cross_entropy(logits, y)
                 reg_loss = model.regularization_loss()
-                loss = cls_loss + reg_loss
+                corr_reg_loss = _umc_corr_reg_loss(model) if (has_umc and umc_corr_reg > 0) else 0.0
+                loss = cls_loss + reg_loss + (umc_corr_reg * corr_reg_loss)
 
             scaler.scale(loss).backward()
             scaler.step(opt)
@@ -235,22 +459,48 @@ def train_one(
         if metrics["oa"] > best["oa"]:
             best = {**metrics, "epoch": epoch}
 
+        umc_stats = {}
+        if has_umc and umc_stats_batches > 0:
+            umc_stats = _collect_umc_stats(
+                model,
+                test_loader,
+                device=device,
+                max_batches=umc_stats_batches,
+            )
+
+        stress_acc = None
+        if stress_loader is not None and stress_interval > 0 and (epoch % stress_interval == 0):
+            seed = stress_seed if stress_seed is not None else 0
+            stress_acc = _eval_stress_accuracy(model, stress_loader, device=device, seed=seed)
+
         avg_loss = total_loss / max(total_items, 1)
         lr_now = scheduler.get_last_lr()[0]
-        print(
-            f"Epoch {epoch:03d} | loss={avg_loss:.4f} | lr={lr_now:.2e} | test_OA={metrics['oa']*100:.2f} | test_mAcc={metrics['macc']*100:.2f}",
-            flush=True,
+        msg = (
+            f"Epoch {epoch:03d} | loss={avg_loss:.4f} | lr={lr_now:.2e} | "
+            f"test_OA={metrics['oa']*100:.2f} | test_mAcc={metrics['macc']*100:.2f}"
         )
-        if wandb_run is not None:
-            wandb_run.log(
-                {
-                    "loss": avg_loss,
-                    "lr": lr_now,
-                    "test_OA": metrics["oa"] * 100,
-                    "test_mAcc": metrics["macc"] * 100,
-                },
-                step=epoch,
+        if "umc_w_var" in umc_stats:
+            msg += (
+                f" | umc_w_var={umc_stats['umc_w_var']:.6f}"
+                f" | umc_w_std={umc_stats.get('umc_w_std', 0.0):.6f}"
+                f" | umc_w_min={umc_stats.get('umc_w_min', 0.0):.6f}"
+                f" | umc_w_max={umc_stats.get('umc_w_max', 0.0):.6f}"
             )
+        if stress_acc is not None:
+            msg += f" | stress_OA(beta={stress_beta:.2f})={stress_acc*100:.2f}"
+        print(msg, flush=True)
+        if wandb_run is not None:
+            payload = {
+                "loss": avg_loss,
+                "lr": lr_now,
+                "test_OA": metrics["oa"] * 100,
+                "test_mAcc": metrics["macc"] * 100,
+            }
+            if umc_stats:
+                payload.update(umc_stats)
+            if stress_acc is not None:
+                payload[f"stress_OA_beta_{stress_beta:.1f}"] = stress_acc * 100
+            wandb_run.log(payload, step=epoch)
 
     final = eval_metrics(model, test_loader, device=device, num_classes=num_classes)
     return {"final": final, "best": best}
@@ -306,6 +556,20 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--umc_knn", type=int, default=20, help="k for UMC k-NN graph (default: 20)")
     p.add_argument("--umc_min_weight", type=float, default=1e-4, help="Minimum weight for UMC (default: 1e-4)")
     p.add_argument("--umc_no_inverse", action="store_true", help="Disable the W^{-1} factor in reconstruction")
+    p.add_argument(
+        "--umc_corr_reg",
+        type=float,
+        default=0.0,
+        help="Weight for corr(w, mean_dist) regularizer; positive encourages negative correlation. (default: 0.0)",
+    )
+    p.add_argument("--save_ckpt", action="store_true", help="Save model checkpoint after training")
+    p.add_argument("--ckpt_dir", type=str, default="checkpoints", help="Directory to save checkpoints (default: checkpoints)")
+
+    # UMC diagnostics / stress eval
+    p.add_argument("--umc_stats_batches", type=int, default=10, help="Batches to estimate UMC stats each epoch (default: 10)")
+    p.add_argument("--stress_beta", type=float, default=2.0, help="Bias strength for stress eval (default: 2.0)")
+    p.add_argument("--stress_interval", type=int, default=10, help="Eval stress accuracy every N epochs (default: 10, 0 disables)")
+    p.add_argument("--stress_dense_points", type=int, default=2048, help="Dense points before stress resample (default: 2048)")
 
     p.add_argument("--out_csv", type=str, default="pointwavelet_umc_results.csv", help="Output CSV file name (default: pointwavelet_umc_results.csv)")
     return p.parse_args()
@@ -369,6 +633,19 @@ def main() -> None:
         pin_memory=(device.type == "cuda"),
     )
 
+    stress_loader = None
+    if args.stress_interval > 0:
+        stress_loader = build_stress_loader(
+            root=args.data_root,
+            num_points=args.num_points,
+            dense_points=args.stress_dense_points,
+            modelnet=str(args.modelnet),
+            bias_strength=args.stress_beta,
+            batch_size=args.batch_size,
+            force_reload=bool(args.force_reload),
+            device=device,
+        )
+
     num_classes = 10 if str(args.modelnet) == "10" else 40
     results: List[dict] = []
     for seed in seeds:
@@ -400,6 +677,12 @@ def main() -> None:
                 amp=bool(args.amp),
                 num_classes=num_classes,
                 wandb_run=run,
+                umc_stats_batches=max(int(args.umc_stats_batches), 0),
+                stress_loader=stress_loader,
+                stress_interval=max(int(args.stress_interval), 0),
+                stress_beta=float(args.stress_beta),
+                stress_seed=seed + int(round(1000 * float(args.stress_beta))),
+                umc_corr_reg=float(args.umc_corr_reg),
             )
             if run is not None:
                 run.finish()
@@ -412,6 +695,27 @@ def main() -> None:
                     "best_epoch": out["best"]["epoch"],
                 }
             )
+            if args.save_ckpt:
+                os.makedirs(args.ckpt_dir, exist_ok=True)
+                ckpt_name = f"{method_key}_modelnet{args.modelnet}_n{args.num_points}_seed{seed}.pt"
+                ckpt_path = os.path.join(args.ckpt_dir, ckpt_name)
+                meta = {
+                    "seed": seed,
+                    "method": method_key,
+                    "modelnet": str(args.modelnet),
+                    "num_points": int(args.num_points),
+                    "num_classes": int(num_classes),
+                    "wf_learnable": bool(args.wf_learnable),
+                    "umc_hidden": list(umc_hidden),
+                    "umc_knn": int(args.umc_knn),
+                    "umc_min_weight": float(args.umc_min_weight),
+                    "umc_use_inverse": not bool(args.umc_no_inverse),
+                    "epochs": int(args.epochs),
+                    "final": out["final"],
+                    "best": out["best"],
+                }
+                _save_checkpoint(ckpt_path, model, meta)
+                print(f"Saved checkpoint to {ckpt_path}", flush=True)
 
             del model
             if device.type == "cuda":
