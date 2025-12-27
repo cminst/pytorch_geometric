@@ -559,8 +559,8 @@ def parse_args() -> argparse.Namespace:
     p.add_argument(
         "--umc_corr_reg",
         type=float,
-        default=0.01,
-        help="Weight for corr(w, mean_dist) regularizer; positive encourages negative correlation. (default: 0.01)",
+        default=0.0,
+        help="Weight for corr(w, mean_dist) regularizer; positive encourages negative correlation. (default: 0.0)",
     )
     p.add_argument("--save_ckpt", action="store_true", help="Save model checkpoint after training")
     p.add_argument("--ckpt_dir", type=str, default="checkpoints", help="Directory to save checkpoints (default: checkpoints)")
