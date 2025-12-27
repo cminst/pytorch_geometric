@@ -2,7 +2,7 @@ import argparse
 
 import torch
 import torch.nn.functional as F
-from utils.datasets import get_dataset
+from utils.datasets import get_modelnet_dataset
 from train_eval import run
 from torch.nn import Linear as Lin
 from torch.nn import ReLU
@@ -70,7 +70,7 @@ class Net(torch.nn.Module):
         return F.log_softmax(x, dim=-1)
 
 
-train_dataset, test_dataset = get_dataset(num_points=1024)
+train_dataset, test_dataset = get_modelnet_dataset(num_points=1024)
 model = Net(train_dataset.num_classes)
 run(train_dataset, test_dataset, model, args.epochs, args.batch_size, args.lr,
     args.lr_decay_factor, args.lr_decay_step_size, args.weight_decay,

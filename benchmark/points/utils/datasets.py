@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import copy
+import os.path as osp
 from typing import Callable, Optional
 
+import torch_geometric.transforms as T
 import torch
 from torch_geometric.data import Batch
-from torch_geometric.loader import DataLoader
 from torch_geometric.datasets import ModelNet
+from torch_geometric.loader import DataLoader
 from torch_geometric.transforms import (
     Compose,
     KNNGraph,
@@ -234,3 +236,17 @@ def make_loaders(train_ds, val_ds, test_ds, batch_size: int, seed: int, drop_las
     val_loader = DataLoader(val_ds, batch_size=batch_size, shuffle=False, drop_last=False, num_workers=num_workers, persistent_workers=persistent_workers)
     test_loader = DataLoader(test_ds, batch_size=batch_size, shuffle=False, drop_last=False, num_workers=num_workers, persistent_workers=persistent_workers)
     return train_loader, val_loader, test_loader
+
+
+def get_modelnet_dataset(num_points):
+    name = 'ModelNet10'
+    path = osp.join(osp.dirname(osp.realpath(__file__)), '..', 'data', name)
+    pre_transform = T.NormalizeScale()
+    transform = T.SamplePoints(num_points)
+
+    train_dataset = ModelNet(path, name='10', train=True, transform=transform,
+                             pre_transform=pre_transform)
+    test_dataset = ModelNet(path, name='10', train=False, transform=transform,
+                            pre_transform=pre_transform)
+
+    return train_dataset, test_dataset

@@ -125,19 +125,6 @@ class ScanObjectNN(InMemoryDataset):
         return data_list
 
 
-def get_dataset(num_points, root=None):
-    path = root or DEFAULT_MODELNET_ROOT
-    pre_transform = T.NormalizeScale()
-    transform = T.SamplePoints(num_points)
-
-    train_dataset = ModelNet(path, name='10', train=True, transform=transform,
-                             pre_transform=pre_transform)
-    test_dataset = ModelNet(path, name='10', train=False, transform=transform,
-                            pre_transform=pre_transform)
-
-    return train_dataset, test_dataset
-
-
 if __name__ == '__main__':
     dataset = ScanObjectNN(root='data/ScanObjectNN', train=True)
     print(f'Dataset: {dataset}')
