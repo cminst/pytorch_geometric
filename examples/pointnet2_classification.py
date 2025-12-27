@@ -12,6 +12,7 @@ from torch_geometric.typing import WITH_TORCH_CLUSTER
 if not WITH_TORCH_CLUSTER:
     quit("This example requires 'torch-cluster'")
 
+VARIANT = '10'  # Change to '40' to use ModelNet40
 
 class SAModule(torch.nn.Module):
     def __init__(self, ratio, r, nn):
@@ -30,7 +31,6 @@ class SAModule(torch.nn.Module):
         pos, batch = pos[idx], batch[idx]
         return x, pos, batch
 
-
 class GlobalSAModule(torch.nn.Module):
     def __init__(self, nn):
         super().__init__()
@@ -42,7 +42,6 @@ class GlobalSAModule(torch.nn.Module):
         pos = pos.new_zeros((x.size(0), 3))
         batch = torch.arange(x.size(0), device=batch.device)
         return x, pos, batch
-
 
 class Net(torch.nn.Module):
     def __init__(self):
@@ -64,7 +63,6 @@ class Net(torch.nn.Module):
 
         return self.mlp(x).log_softmax(dim=-1)
 
-
 def train(epoch):
     model.train()
 
@@ -74,7 +72,6 @@ def train(epoch):
         loss = F.nll_loss(model(data), data.y)
         loss.backward()
         optimizer.step()
-
 
 def test(loader):
     model.eval()
@@ -87,13 +84,12 @@ def test(loader):
         correct += pred.eq(data.y).sum().item()
     return correct / len(loader.dataset)
 
-
 if __name__ == '__main__':
     path = osp.join(osp.dirname(osp.realpath(__file__)), '..',
-                    'data/ModelNet10')
+                    f'data/ModelNet{VARIANT}')
     pre_transform, transform = T.NormalizeScale(), T.SamplePoints(1024)
-    train_dataset = ModelNet(path, '10', True, transform, pre_transform)
-    test_dataset = ModelNet(path, '10', False, transform, pre_transform)
+    train_dataset = ModelNet(path, VARIANT, True, transform, pre_transform)
+    test_dataset = ModelNet(path, VARIANT, False, transform, pre_transform)
     train_loader = DataLoader(train_dataset, batch_size=32, shuffle=True,
                               num_workers=6)
     test_loader = DataLoader(test_dataset, batch_size=32, shuffle=False,
