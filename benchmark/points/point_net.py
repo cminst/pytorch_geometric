@@ -2,7 +2,7 @@ import argparse
 
 import torch
 import torch.nn.functional as F
-from datasets import get_dataset
+from utils.datasets import get_dataset
 from train_eval import run
 from torch.nn import Linear as Lin
 from torch.nn import ReLU
