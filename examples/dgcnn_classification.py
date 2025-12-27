@@ -16,8 +16,8 @@ parser = argparse.ArgumentParser(
 parser.add_argument(
     '--dataset',
     type=str,
-    default='modelnet10',
-    choices=['modelnet10', 'modelnet40', 'medshapenet'],
+    default='ModelNet10',
+    choices=['ModelNet10', 'ModelNet40', 'MedShapeNet'],
     help='Dataset name.',
 )
 parser.add_argument(
@@ -42,12 +42,12 @@ print('The root is: ', root)
 pre_transform, transform = T.NormalizeScale(), T.SamplePoints(1024)
 
 print('The Dataset is: ', args.dataset)
-if args.dataset == 'modelnet40':
+if args.dataset == 'ModelNet40':
     print('Loading training data')
     train_dataset = ModelNet(root, '40', True, transform, pre_transform)
     print('Loading test data')
     test_dataset = ModelNet(root, '40', False, transform, pre_transform)
-elif args.dataset == 'medshapenet':
+elif args.dataset == 'MedShapeNet':
     print('Loading dataset')
     dataset = MedShapeNet(root=root, size=50, pre_transform=pre_transform,
                           transform=transform, force_reload=False)
@@ -69,7 +69,7 @@ elif args.dataset == 'medshapenet':
     train_dataset = dataset[train_indices]
     test_dataset = dataset[test_indices]
 
-elif args.dataset == 'modelnet10':
+elif args.dataset == 'ModelNet10':
     print('Loading training data')
     train_dataset = ModelNet(root, '10', True, transform, pre_transform)
     print('Loading test data')
@@ -78,7 +78,7 @@ elif args.dataset == 'modelnet10':
 else:
     raise ValueError(
         f"Unknown dataset name '{args.dataset}'. "
-        f"Available options: 'modelnet10', 'modelnet40', 'medshapenet'.")
+        f"Available options: 'ModelNet10', 'ModelNet40', 'MedShapeNet'.")
 
 train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True,
                           num_workers=num_workers)
@@ -86,7 +86,6 @@ test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False,
                          num_workers=num_workers)
 
 print('Running model')
-
 
 class Net(torch.nn.Module):
     def __init__(self, out_channels, k=20, aggr='max'):
@@ -107,12 +106,10 @@ class Net(torch.nn.Module):
         out = self.mlp(out)
         return F.log_softmax(out, dim=1)
 
-
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 model = Net(train_dataset.num_classes, k=20).to(device)
 optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
 scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=20, gamma=0.5)
-
 
 def train():
     model.train()
@@ -128,7 +125,6 @@ def train():
         optimizer.step()
     return total_loss / len(train_dataset)
 
-
 def test(loader):
     model.eval()
 
@@ -139,7 +135,6 @@ def test(loader):
             pred = model(data).max(dim=1)[1]
         correct += pred.eq(data.y).sum().item()
     return correct / len(loader.dataset)
-
 
 for epoch in range(1, num_epochs):
     loss = train()
