@@ -23,6 +23,8 @@ class PointWaveletClsConfig:
     wf_depth: int = 2
     wf_heads: int = 4
     wf_sigma_mode: str = "mean"
+    wf_chunk_size: Optional[int] = None
+    wf_force_math_attn: bool = False
 
     # Universal Measure Correction (UMC)
     wf_use_umc: bool = False
@@ -61,6 +63,8 @@ class PointWaveletClassifier(nn.Module):
                 wf_learnable=cfg.wf_learnable,
                 wf_beta=cfg.wf_beta,
                 wf_sigma_mode=cfg.wf_sigma_mode,
+                wf_chunk_size=cfg.wf_chunk_size,
+                wf_force_math_attn=cfg.wf_force_math_attn,
                 wf_use_umc=cfg.wf_use_umc,
                 wf_umc_hidden=cfg.wf_umc_hidden,
                 wf_umc_knn=cfg.wf_umc_knn,
@@ -81,6 +85,8 @@ class PointWaveletClassifier(nn.Module):
                 wf_learnable=cfg.wf_learnable,
                 wf_beta=cfg.wf_beta,
                 wf_sigma_mode=cfg.wf_sigma_mode,
+                wf_chunk_size=cfg.wf_chunk_size,
+                wf_force_math_attn=cfg.wf_force_math_attn,
                 wf_use_umc=cfg.wf_use_umc,
                 wf_umc_hidden=cfg.wf_umc_hidden,
                 wf_umc_knn=cfg.wf_umc_knn,
@@ -101,6 +107,8 @@ class PointWaveletClassifier(nn.Module):
                 wf_learnable=cfg.wf_learnable,
                 wf_beta=cfg.wf_beta,
                 wf_sigma_mode=cfg.wf_sigma_mode,
+                wf_chunk_size=cfg.wf_chunk_size,
+                wf_force_math_attn=cfg.wf_force_math_attn,
                 wf_use_umc=cfg.wf_use_umc,
                 wf_umc_hidden=cfg.wf_umc_hidden,
                 wf_umc_knn=cfg.wf_umc_knn,
@@ -121,6 +129,8 @@ class PointWaveletClassifier(nn.Module):
                 wf_learnable=cfg.wf_learnable,
                 wf_beta=cfg.wf_beta,
                 wf_sigma_mode=cfg.wf_sigma_mode,
+                wf_chunk_size=cfg.wf_chunk_size,
+                wf_force_math_attn=cfg.wf_force_math_attn,
                 wf_use_umc=cfg.wf_use_umc,
                 wf_umc_hidden=cfg.wf_umc_hidden,
                 wf_umc_knn=cfg.wf_umc_knn,

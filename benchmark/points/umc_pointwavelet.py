@@ -477,6 +477,8 @@ def build_model(
     umc_min_weight: float,
     umc_use_inverse: bool,
     num_classes: int,
+    wf_chunk_size: Optional[int],
+    wf_force_math_attn: bool,
     wf_J: int = 5,
     wf_beta: float = 0.05,
 ) -> PointWaveletClassifier:
@@ -489,6 +491,8 @@ def build_model(
         wf_depth=2,
         wf_heads=4,
         wf_sigma_mode="mean",
+        wf_chunk_size=wf_chunk_size,
+        wf_force_math_attn=wf_force_math_attn,
         wf_use_umc=use_umc,
         wf_umc_hidden=umc_hidden,
         wf_umc_knn=umc_knn,
@@ -702,6 +706,18 @@ def parse_args() -> argparse.Namespace:
         default=True,
         help="Use PointWavelet-L (learnable spectral basis). (default: True)",
     )
+    p.add_argument(
+        "--wf_chunk_size",
+        type=int,
+        default=0,
+        help="Chunk size over patches inside WaveletFormer to reduce VRAM (0 disables).",
+    )
+    p.add_argument(
+        "--wf_force_math_attn",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Force math SDPA in WaveletFormer to avoid Flash/MemEff kernels. (default: True)",
+    )
 
     # UMC settings
     p.add_argument("--umc_hidden", type=str, default="128,32", help="Hidden widths for UMC MLP (default: 128,32)")
@@ -845,6 +861,8 @@ def main() -> None:
                 umc_min_weight=args.umc_min_weight,
                 umc_use_inverse=not bool(args.umc_no_inverse),
                 num_classes=num_classes,
+                wf_chunk_size=(int(args.wf_chunk_size) if int(args.wf_chunk_size) > 0 else None),
+                wf_force_math_attn=bool(args.wf_force_math_attn),
             )
             out = train_one(
                 model,
