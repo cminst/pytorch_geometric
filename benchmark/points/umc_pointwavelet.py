@@ -663,9 +663,18 @@ def parse_args() -> argparse.Namespace:
         action=argparse.BooleanOptionalAction,
         default=True,
         help=(
-            "Match PointMLP ScanObjectNN setup: PB_T50_RS + main_split, "
-            "scale+translate only, no NormalizeScale/Jitter, SGD+cosine, "
-            "batch=32, lr=0.01. (default: True for ScanObjectNN)"
+            "Match PointMLP ScanObjectNN data pipeline: PB_T50_RS + main_split, "
+            "scale+translate only, no NormalizeScale/Jitter, deterministic first-N points, shuffle. "
+            "(default: True for ScanObjectNN)"
+        ),
+    )
+    p.add_argument(
+        "--scan_pointmlp_recipe",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help=(
+            "Also match PointMLP training recipe: SGD+cosine, batch=32, lr=0.01, epochs=200. "
+            "(default: False)"
         ),
     )
     p.add_argument("--force_reload", action="store_true", help="Force reprocessing the dataset")
@@ -772,15 +781,16 @@ def main() -> None:
         if args.scan_pointmlp_style:
             args.scan_variant = "PB_T50_RS"
             args.scan_split_dir = "main_split"
-            # PointMLP training recipe
-            args.batch_size = 32
-            args.lr = 0.01
-            args.epochs = 200
-            args.weight_decay = 1e-4
-            args.optimizer = "sgd"
-            args.scheduler = "cosine"
-            if args.lr_min is None:
-                args.lr_min = args.lr / 100.0
+            if args.scan_pointmlp_recipe:
+                # PointMLP training recipe
+                args.batch_size = 32
+                args.lr = 0.01
+                args.epochs = 200
+                args.weight_decay = 1e-4
+                args.optimizer = "sgd"
+                args.scheduler = "cosine"
+                if args.lr_min is None:
+                    args.lr_min = args.lr / 100.0
         else:
             if args.scan_variant is None:
                 args.scan_variant = "OBJ_ONLY"
