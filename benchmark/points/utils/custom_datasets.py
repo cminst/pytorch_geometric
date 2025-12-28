@@ -6,6 +6,7 @@ import torch
 import torch_geometric.transforms as T
 from torch_geometric.data import Data, InMemoryDataset, download_url
 from torch_geometric.datasets import ModelNet
+from typing import Optional
 
 DEFAULT_MODELNET_ROOT = osp.join(
     osp.dirname(osp.realpath(__file__)), '..', 'data', 'ModelNet'
@@ -44,7 +45,7 @@ class ScanObjectNN(InMemoryDataset):
             (default: :obj:`False`)
     """
     base_url = 'https://huggingface.co/datasets/cminst/ScanObjectNN/resolve/main'
-    split_dir = 'main_split_nobg'
+    default_split_dir = 'main_split_nobg'
     variants = {
         'OBJ_ONLY': 'objectdataset.h5',
         'PB_T25': 'objectdataset_augmented25_norot.h5',
@@ -53,10 +54,11 @@ class ScanObjectNN(InMemoryDataset):
         'PB_T50_RS': 'objectdataset_augmentedrot_scale75.h5',
     }
 
-    def __init__(self, root, train=True, variant='PB_T50_RS', transform=None,
+    def __init__(self, root, train=True, variant='PB_T50_RS', split_dir: Optional[str] = None, transform=None,
                  pre_transform=None, pre_filter=None, force_reload: bool = False):
         self.train = train
         self.variant = self._canonical_variant(variant)
+        self.split_dir = split_dir or self.default_split_dir
         super().__init__(root, transform, pre_transform, pre_filter,
                          force_reload=force_reload)
         path = self.processed_paths[0] if train else self.processed_paths[1]
@@ -84,8 +86,8 @@ class ScanObjectNN(InMemoryDataset):
     @property
     def processed_file_names(self):
         return [
-            f'{self.variant}_training.pt',
-            f'{self.variant}_test.pt',
+            f'{self.split_dir}_{self.variant}_training.pt',
+            f'{self.split_dir}_{self.variant}_test.pt',
         ]
 
     def download(self):

@@ -40,13 +40,22 @@ from torch_geometric.transforms import (
 
 from pointwavelet import PointWaveletClassifier, PointWaveletClsConfig
 from utils.custom_datasets import ScanObjectNN
-from utils.transforms import IrregularResample, PointJitter, PointMLPAffine
+from utils.transforms import (
+    IrregularResample,
+    PointJitter,
+    PointMLPAffine,
+    RandomShufflePoints,
+    TakeFirstPoints,
+)
 
 DATASET_INFO = {
     "ModelNet10": {"num_classes": 10},
     "ModelNet40": {"num_classes": 40},
     "ScanObjectNN": {"num_classes": 15},
 }
+
+SCAN_VARIANTS = ["OBJ_ONLY", "PB_T25", "PB_T25_R", "PB_T50_R", "PB_T50_RS"]
+SCAN_SPLITS = ["main_split", "main_split_nobg"]
 
 
 def _device() -> torch.device:
@@ -316,9 +325,11 @@ def _resolve_dataset_root(data_root: str, dataset_name: str) -> str:
     return os.path.join(data_root, dataset_name)
 
 
-def _build_sampling_transform(dataset_name: str, num_points: int):
+def _build_sampling_transform(dataset_name: str, num_points: int, scan_pointmlp_style: bool):
     if dataset_name in {"ModelNet10", "ModelNet40"}:
         return SamplePoints(num_points)
+    if dataset_name == "ScanObjectNN" and scan_pointmlp_style:
+        return TakeFirstPoints(num_points)
     return FixedPoints(num_points, replace=False, allow_duplicates=True)
 
 
@@ -328,6 +339,8 @@ def _load_dataset(
     train: bool,
     transform,
     force_reload: bool,
+    scan_variant: str,
+    scan_split_dir: str,
 ):
     if dataset_name == "ModelNet10":
         return ModelNet(
@@ -354,7 +367,8 @@ def _load_dataset(
             pre_transform=None,
             transform=transform,
             force_reload=force_reload,
-            variant="OBJ_ONLY",
+            variant=scan_variant,
+            split_dir=scan_split_dir,
         )
     raise ValueError(f"Unknown dataset_name: {dataset_name}. Supported: {list(DATASET_INFO.keys())}")
 
@@ -364,28 +378,43 @@ def build_datasets(
     num_points: int,
     force_reload: bool,
     dataset_name: str,
+    scan_variant: str,
+    scan_split_dir: str,
+    scan_pointmlp_style: bool,
 ) -> Tuple[Dataset, Dataset]:
-    sampling = _build_sampling_transform(dataset_name, num_points)
-    train_transform = Compose(
-        [
-            sampling,
-            NormalizeScale(),
-            PointMLPAffine(),
-            PointJitter(),
-        ]
-    )
-    test_transform = Compose(
-        [
-            sampling,
-            NormalizeScale(),
-        ]
-    )
+    sampling = _build_sampling_transform(dataset_name, num_points, scan_pointmlp_style)
+    if dataset_name == "ScanObjectNN" and scan_pointmlp_style:
+        train_transform = Compose(
+            [
+                sampling,
+                PointMLPAffine(),
+                RandomShufflePoints(),
+            ]
+        )
+        test_transform = Compose([sampling])
+    else:
+        train_transform = Compose(
+            [
+                sampling,
+                NormalizeScale(),
+                PointMLPAffine(),
+                PointJitter(),
+            ]
+        )
+        test_transform = Compose(
+            [
+                sampling,
+                NormalizeScale(),
+            ]
+        )
     train_ds = _load_dataset(
         dataset_name=dataset_name,
         root=root,
         train=True,
         transform=train_transform,
         force_reload=force_reload,
+        scan_variant=scan_variant,
+        scan_split_dir=scan_split_dir,
     )
     test_ds = _load_dataset(
         dataset_name=dataset_name,
@@ -393,6 +422,8 @@ def build_datasets(
         train=False,
         transform=test_transform,
         force_reload=force_reload,
+        scan_variant=scan_variant,
+        scan_split_dir=scan_split_dir,
     )
     return train_ds, test_ds
 
@@ -406,8 +437,11 @@ def build_stress_loader(
     batch_size: int,
     force_reload: bool,
     device: torch.device,
+    scan_variant: str,
+    scan_split_dir: str,
+    scan_pointmlp_style: bool,
 ) -> DataLoader:
-    sampling = _build_sampling_transform(dataset_name, dense_points)
+    sampling = _build_sampling_transform(dataset_name, dense_points, scan_pointmlp_style)
     stress_transform = Compose(
         [
             sampling,
@@ -421,6 +455,8 @@ def build_stress_loader(
         train=False,
         transform=stress_transform,
         force_reload=force_reload,
+        scan_variant=scan_variant,
+        scan_split_dir=scan_split_dir,
     )
     return DataLoader(
         stress_ds,
@@ -472,6 +508,10 @@ def train_one(
     weight_decay: float,
     lr_step: int,
     lr_gamma: float,
+    optim_name: str,
+    scheduler_name: str,
+    lr_min: Optional[float],
+    sgd_momentum: float,
     amp: bool,
     num_classes: int,
     wandb_run: Optional[object] = None,
@@ -484,8 +524,21 @@ def train_one(
 ) -> dict:
     model = model.to(device)
 
-    opt = torch.optim.Adam(model.parameters(), lr=lr, weight_decay=weight_decay)
-    scheduler = torch.optim.lr_scheduler.StepLR(opt, step_size=max(lr_step, 1), gamma=lr_gamma)
+    if optim_name == "sgd":
+        opt = torch.optim.SGD(
+            model.parameters(),
+            lr=lr,
+            momentum=sgd_momentum,
+            weight_decay=weight_decay,
+        )
+    else:
+        opt = torch.optim.Adam(model.parameters(), lr=lr, weight_decay=weight_decay)
+
+    if scheduler_name == "cosine":
+        eta_min = lr_min if lr_min is not None else lr / 100.0
+        scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(opt, T_max=epochs, eta_min=eta_min)
+    else:
+        scheduler = torch.optim.lr_scheduler.StepLR(opt, step_size=max(lr_step, 1), gamma=lr_gamma)
 
     use_amp = bool(amp and device.type == "cuda")
     scaler = torch.amp.GradScaler("cuda", enabled=use_amp)
@@ -587,6 +640,30 @@ def parse_args() -> argparse.Namespace:
         choices=list(DATASET_INFO.keys()),
         help="Dataset name (default: ModelNet40)",
     )
+    p.add_argument(
+        "--scan_variant",
+        type=str,
+        default=None,
+        choices=SCAN_VARIANTS,
+        help="ScanObjectNN variant (default: OBJ_ONLY unless --scan_pointmlp_style).",
+    )
+    p.add_argument(
+        "--scan_split_dir",
+        type=str,
+        default=None,
+        choices=SCAN_SPLITS,
+        help="ScanObjectNN split dir (default: main_split_nobg unless --scan_pointmlp_style).",
+    )
+    p.add_argument(
+        "--scan_pointmlp_style",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help=(
+            "Match PointMLP ScanObjectNN setup: PB_T50_RS + main_split, "
+            "scale+translate only, no NormalizeScale/Jitter, SGD+cosine, "
+            "batch=32, lr=0.01. (default: True for ScanObjectNN)"
+        ),
+    )
     p.add_argument("--force_reload", action="store_true", help="Force reprocessing the dataset")
     p.add_argument("--num_points", type=int, default=1024, help="Number of points to sample (default: 1024)")
     p.add_argument("--batch_size", type=int, default=16, help="Batch size for DataLoaders (default: 16)")
@@ -594,8 +671,12 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--epochs", type=int, default=200, help="Number of training epochs (default: 200)")
     p.add_argument("--lr", type=float, default=1e-3, help="Learning rate (default: 1e-3)")
     p.add_argument("--weight_decay", type=float, default=1e-4, help="Weight decay (default: 1e-4)")
+    p.add_argument("--optimizer", type=str, default="adam", choices=["adam", "sgd"], help="Optimizer (default: adam)")
+    p.add_argument("--scheduler", type=str, default="step", choices=["step", "cosine"], help="LR scheduler (default: step)")
     p.add_argument("--lr_step", type=int, default=20, help="Learning rate decay step (default: 20)")
     p.add_argument("--lr_gamma", type=float, default=0.7, help="Learning rate decay gamma (default: 0.7)")
+    p.add_argument("--lr_min", type=float, default=None, help="Cosine min LR (default: lr/100)")
+    p.add_argument("--sgd_momentum", type=float, default=0.9, help="SGD momentum (default: 0.9)")
     p.add_argument("--amp", action="store_true", help="Use CUDA AMP (fp16) if available")
     p.add_argument("--seeds", type=str, default="0", help="Comma-separated seeds, e.g. '0,1,2,3' (default: 0)")
     p.add_argument(
@@ -671,6 +752,29 @@ def _resolve_methods(choice: str) -> List[Tuple[str, bool, str]]:
 
 def main() -> None:
     args = parse_args()
+    if args.dataset_name == "ScanObjectNN":
+        if args.scan_pointmlp_style:
+            args.scan_variant = "PB_T50_RS"
+            args.scan_split_dir = "main_split"
+            # PointMLP training recipe
+            args.batch_size = 32
+            args.lr = 0.01
+            args.epochs = 200
+            args.weight_decay = 1e-4
+            args.optimizer = "sgd"
+            args.scheduler = "cosine"
+            if args.lr_min is None:
+                args.lr_min = args.lr / 100.0
+        else:
+            if args.scan_variant is None:
+                args.scan_variant = "OBJ_ONLY"
+            if args.scan_split_dir is None:
+                args.scan_split_dir = "main_split_nobg"
+    if args.scan_variant is None:
+        args.scan_variant = "OBJ_ONLY"
+    if args.scan_split_dir is None:
+        args.scan_split_dir = "main_split_nobg"
+
     device = _device()
     print(f"Device: {device}", flush=True)
 
@@ -684,6 +788,9 @@ def main() -> None:
         args.num_points,
         force_reload=bool(args.force_reload),
         dataset_name=args.dataset_name,
+        scan_variant=args.scan_variant,
+        scan_split_dir=args.scan_split_dir,
+        scan_pointmlp_style=bool(args.scan_pointmlp_style),
     )
 
     train_loader = DataLoader(
@@ -716,6 +823,9 @@ def main() -> None:
             batch_size=args.batch_size,
             force_reload=bool(args.force_reload),
             device=device,
+            scan_variant=args.scan_variant,
+            scan_split_dir=args.scan_split_dir,
+            scan_pointmlp_style=bool(args.scan_pointmlp_style),
         )
 
     num_classes = DATASET_INFO[args.dataset_name]["num_classes"]
@@ -746,6 +856,10 @@ def main() -> None:
                 weight_decay=args.weight_decay,
                 lr_step=args.lr_step,
                 lr_gamma=args.lr_gamma,
+                optim_name=str(args.optimizer),
+                scheduler_name=str(args.scheduler),
+                lr_min=args.lr_min,
+                sgd_momentum=float(args.sgd_momentum),
                 amp=bool(args.amp),
                 num_classes=num_classes,
                 wandb_run=run,
