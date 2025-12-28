@@ -5,8 +5,10 @@ from typing import Optional, Tuple
 
 import torch
 import torch.nn as nn
-
-from pointwavelet.layers.pointnet2_modules import PointNetSetAbstractionWavelet, SAWaveletConfig
+from pointwavelet.layers.pointnet2_modules import (
+    PointNetSetAbstractionWavelet,
+    SAWaveletConfig,
+)
 
 
 @dataclass
