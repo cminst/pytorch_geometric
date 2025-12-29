@@ -1,3 +1,4 @@
+import argparse
 import os.path as osp
 import random
 
@@ -15,7 +16,24 @@ from benchmark.points.utils.transforms import IrregularResample
 if not WITH_TORCH_CLUSTER:
     quit("This example requires 'torch-cluster'")
 
-VARIANT = '10'  # Change to '40' to use ModelNet40
+parser = argparse.ArgumentParser(
+    formatter_class=argparse.ArgumentDefaultsHelpFormatter, )
+parser.add_argument(
+    '--dataset',
+    type=str,
+    default='ModelNet10',
+    choices=['ModelNet10', 'ModelNet40'],
+    help='Dataset name.',
+)
+parser.add_argument(
+    '--dataset_dir',
+    type=str,
+    default='./data',
+    help='Root directory of dataset.',
+)
+parser.add_argument('--batch_size', type=int, default=32)
+parser.add_argument('--num_workers', type=int, default=6)
+parser.add_argument('--epochs', type=int, default=201)
 NUM_POINTS = 1024
 STRESS_DENSE_POINTS = 2048
 STRESS_BETAS = [0, 1, 2, 3, 4, 5]
@@ -74,7 +92,7 @@ class GlobalSAModule(torch.nn.Module):
         return x, pos, batch
 
 class Net(torch.nn.Module):
-    def __init__(self):
+    def __init__(self, out_channels):
         super().__init__()
 
         # Input channels account for both `pos` and node features.
@@ -82,7 +100,7 @@ class Net(torch.nn.Module):
         self.sa2_module = SAModule(0.25, 0.4, MLP([128 + 3, 128, 128, 256]))
         self.sa3_module = GlobalSAModule(MLP([256 + 3, 256, 512, 1024]))
 
-        self.mlp = MLP([1024, 512, 256, int(VARIANT)], dropout=0.5, norm=None)
+        self.mlp = MLP([1024, 512, 256, out_channels], dropout=0.5, norm=None)
 
     def forward(self, data):
         sa0_out = (data.x, data.pos, data.batch)
@@ -143,24 +161,31 @@ def eval_stress_sweep(root, variant, batch_size):
     return results
 
 if __name__ == '__main__':
-    path = osp.join(osp.dirname(osp.realpath(__file__)), '..',
-                    f'data/ModelNet{VARIANT}')
+    args = parser.parse_args()
+
+    num_epochs = args.epochs
+    num_workers = args.num_workers
+    batch_size = args.batch_size
+    root = osp.join(args.dataset_dir, args.dataset)
+
+    variant = '10' if args.dataset == 'ModelNet10' else '40'
+
     pre_transform, transform = T.NormalizeScale(), T.SamplePoints(NUM_POINTS)
-    train_dataset = ModelNet(path, VARIANT, True, transform, pre_transform)
-    test_dataset = ModelNet(path, VARIANT, False, transform, pre_transform)
-    train_loader = DataLoader(train_dataset, batch_size=32, shuffle=True,
-                              num_workers=6)
-    test_loader = DataLoader(test_dataset, batch_size=32, shuffle=False,
-                             num_workers=6)
+    train_dataset = ModelNet(root, variant, True, transform, pre_transform)
+    test_dataset = ModelNet(root, variant, False, transform, pre_transform)
+    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True,
+                              num_workers=num_workers)
+    test_loader = DataLoader(test_dataset, batch_size=batch_size,
+                             shuffle=False, num_workers=num_workers)
 
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    model = Net().to(device)
+    model = Net(train_dataset.num_classes).to(device)
     optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
 
-    for epoch in range(1, 201):
+    for epoch in range(1, num_epochs):
         train(epoch)
         test_acc = test(test_loader)
         print(f'Epoch: {epoch:03d}, Test: {test_acc:.4f}')
 
     if RUN_STRESS_EVAL:
-        eval_stress_sweep(path, VARIANT, batch_size=32)
+        eval_stress_sweep(root, variant, batch_size=batch_size)
