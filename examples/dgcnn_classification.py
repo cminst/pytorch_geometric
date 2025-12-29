@@ -37,7 +37,7 @@ parser.add_argument(
 )
 parser.add_argument('--batch_size', type=int, default=32)
 parser.add_argument('--num_workers', type=int, default=6)
-parser.add_argument('--epochs', type=int, default=201)
+parser.add_argument('--epochs', type=int, default=200)
 
 args = parser.parse_args()
 
@@ -201,7 +201,7 @@ def eval_stress_sweep(root, variant, batch_size):
         print(f"stress beta={beta:.1f} mean={mean:.4f} std={std:.4f}")
     return results
 
-for epoch in range(1, num_epochs):
+for epoch in range(1, num_epochs + 1):
     loss = train()
     test_acc = test(test_loader)
     print(f'Epoch {epoch:03d}, Loss: {loss:.4f}, Test: {test_acc:.4f}')

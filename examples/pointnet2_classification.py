@@ -40,7 +40,7 @@ parser.add_argument(
 )
 parser.add_argument('--batch_size', type=int, default=32)
 parser.add_argument('--num_workers', type=int, default=6)
-parser.add_argument('--epochs', type=int, default=201)
+parser.add_argument('--epochs', type=int, default=200)
 NUM_POINTS = 1024
 STRESS_DENSE_POINTS = 2048
 STRESS_BETAS = [0, 1, 2, 3, 4, 5]
@@ -189,7 +189,7 @@ if __name__ == '__main__':
     model = Net(train_dataset.num_classes).to(device)
     optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
 
-    for epoch in range(1, num_epochs):
+    for epoch in range(1, num_epochs + 1):
         train(epoch)
         test_acc = test(test_loader)
         print(f'Epoch: {epoch:03d}, Test: {test_acc:.4f}')
