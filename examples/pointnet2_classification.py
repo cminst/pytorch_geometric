@@ -1,6 +1,7 @@
 import argparse
 import os.path as osp
 import random
+import sys
 
 import torch
 import torch.nn.functional as F
@@ -11,7 +12,13 @@ from torch_geometric.datasets import ModelNet
 from torch_geometric.loader import DataLoader
 from torch_geometric.nn import MLP, PointNetConv, fps, global_max_pool, radius
 from torch_geometric.typing import WITH_TORCH_CLUSTER
-from benchmark.points.utils.transforms import IrregularResample
+_ROOT = osp.join(osp.dirname(osp.realpath(__file__)), '..')
+_BENCH_POINTS = osp.join(_ROOT, 'benchmark', 'points')
+if _BENCH_POINTS not in sys.path:
+    sys.path.insert(0, _BENCH_POINTS)
+if _ROOT not in sys.path:
+    sys.path.insert(0, _ROOT)
+from utils.transforms import IrregularResample
 
 if not WITH_TORCH_CLUSTER:
     quit("This example requires 'torch-cluster'")

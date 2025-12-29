@@ -1,6 +1,7 @@
 import argparse
 import os.path as osp
 import random
+import sys
 
 import torch
 import torch.nn.functional as F
@@ -11,7 +12,13 @@ import torch_geometric.transforms as T
 from torch_geometric.datasets import MedShapeNet, ModelNet
 from torch_geometric.loader import DataLoader
 from torch_geometric.nn import MLP, DynamicEdgeConv, global_max_pool
-from benchmark.points.utils.transforms import IrregularResample
+_ROOT = osp.join(osp.dirname(osp.realpath(__file__)), '..')
+_BENCH_POINTS = osp.join(_ROOT, 'benchmark', 'points')
+if _BENCH_POINTS not in sys.path:
+    sys.path.insert(0, _BENCH_POINTS)
+if _ROOT not in sys.path:
+    sys.path.insert(0, _ROOT)
+from utils.transforms import IrregularResample
 
 parser = argparse.ArgumentParser(
     formatter_class=argparse.ArgumentDefaultsHelpFormatter, )
