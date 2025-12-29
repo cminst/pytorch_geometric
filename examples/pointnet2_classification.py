@@ -1,18 +1,48 @@
 import os.path as osp
+import random
 
 import torch
 import torch.nn.functional as F
+import numpy as np
 
 import torch_geometric.transforms as T
 from torch_geometric.datasets import ModelNet
 from torch_geometric.loader import DataLoader
 from torch_geometric.nn import MLP, PointNetConv, fps, global_max_pool, radius
 from torch_geometric.typing import WITH_TORCH_CLUSTER
+from benchmark.points.utils.transforms import IrregularResample
 
 if not WITH_TORCH_CLUSTER:
     quit("This example requires 'torch-cluster'")
 
 VARIANT = '10'  # Change to '40' to use ModelNet40
+NUM_POINTS = 1024
+STRESS_DENSE_POINTS = 2048
+STRESS_BETAS = [0, 1, 2, 3, 4, 5]
+STRESS_SEEDS = list(range(1, 11))
+RUN_STRESS_EVAL = True
+
+def _seed_all(seed: int) -> None:
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
+
+def _preserve_rng_state(fn):
+    state = {
+        "py": random.getstate(),
+        "np": np.random.get_state(),
+        "torch": torch.random.get_rng_state(),
+        "cuda": torch.cuda.get_rng_state_all() if torch.cuda.is_available() else None,
+    }
+    try:
+        return fn()
+    finally:
+        random.setstate(state["py"])
+        np.random.set_state(state["np"])
+        torch.random.set_rng_state(state["torch"])
+        if state["cuda"] is not None:
+            torch.cuda.set_rng_state_all(state["cuda"])
 
 class SAModule(torch.nn.Module):
     def __init__(self, ratio, r, nn):
@@ -84,10 +114,38 @@ def test(loader):
         correct += pred.eq(data.y).sum().item()
     return correct / len(loader.dataset)
 
+def _build_stress_loader(root, variant, beta, batch_size):
+    stress_transform = T.Compose([
+        T.SamplePoints(STRESS_DENSE_POINTS),
+        IrregularResample(num_points=NUM_POINTS, bias_strength=float(beta)),
+    ])
+    stress_dataset = ModelNet(root, variant, False, stress_transform,
+                              pre_transform=T.NormalizeScale())
+    return DataLoader(stress_dataset, batch_size=batch_size, shuffle=False,
+                      num_workers=0)
+
+def eval_stress_sweep(root, variant, batch_size):
+    results = {}
+    for beta in STRESS_BETAS:
+        loader = _build_stress_loader(root, variant, beta, batch_size)
+        accs = []
+        for seed in STRESS_SEEDS:
+            def _run():
+                _seed_all(seed)
+                return test(loader)
+            acc = float(_preserve_rng_state(_run))
+            accs.append(acc)
+            print(f"stress beta={beta:.1f} seed={seed} acc={acc:.4f}")
+        mean = float(np.mean(accs)) if accs else 0.0
+        std = float(np.std(accs)) if accs else 0.0
+        results[beta] = (mean, std)
+        print(f"stress beta={beta:.1f} mean={mean:.4f} std={std:.4f}")
+    return results
+
 if __name__ == '__main__':
     path = osp.join(osp.dirname(osp.realpath(__file__)), '..',
                     f'data/ModelNet{VARIANT}')
-    pre_transform, transform = T.NormalizeScale(), T.SamplePoints(1024)
+    pre_transform, transform = T.NormalizeScale(), T.SamplePoints(NUM_POINTS)
     train_dataset = ModelNet(path, VARIANT, True, transform, pre_transform)
     test_dataset = ModelNet(path, VARIANT, False, transform, pre_transform)
     train_loader = DataLoader(train_dataset, batch_size=32, shuffle=True,
@@ -103,3 +161,6 @@ if __name__ == '__main__':
         train(epoch)
         test_acc = test(test_loader)
         print(f'Epoch: {epoch:03d}, Test: {test_acc:.4f}')
+
+    if RUN_STRESS_EVAL:
+        eval_stress_sweep(path, VARIANT, batch_size=32)

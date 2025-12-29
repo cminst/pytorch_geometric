@@ -5,11 +5,13 @@ import random
 import torch
 import torch.nn.functional as F
 from torch.nn import Linear
+import numpy as np
 
 import torch_geometric.transforms as T
 from torch_geometric.datasets import MedShapeNet, ModelNet
 from torch_geometric.loader import DataLoader
 from torch_geometric.nn import MLP, DynamicEdgeConv, global_max_pool
+from benchmark.points.utils.transforms import IrregularResample
 
 parser = argparse.ArgumentParser(
     formatter_class=argparse.ArgumentDefaultsHelpFormatter, )
@@ -39,7 +41,35 @@ root = osp.join(args.dataset_dir, args.dataset)
 
 print('The root is: ', root)
 
-pre_transform, transform = T.NormalizeScale(), T.SamplePoints(1024)
+NUM_POINTS = 1024
+STRESS_DENSE_POINTS = 2048
+STRESS_BETAS = [0, 1, 2, 3, 4, 5]
+STRESS_SEEDS = list(range(1, 11))
+RUN_STRESS_EVAL = True
+
+def _seed_all(seed: int) -> None:
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
+
+def _preserve_rng_state(fn):
+    state = {
+        "py": random.getstate(),
+        "np": np.random.get_state(),
+        "torch": torch.random.get_rng_state(),
+        "cuda": torch.cuda.get_rng_state_all() if torch.cuda.is_available() else None,
+    }
+    try:
+        return fn()
+    finally:
+        random.setstate(state["py"])
+        np.random.set_state(state["np"])
+        torch.random.set_rng_state(state["torch"])
+        if state["cuda"] is not None:
+            torch.cuda.set_rng_state_all(state["cuda"])
+
+pre_transform, transform = T.NormalizeScale(), T.SamplePoints(NUM_POINTS)
 
 print('The Dataset is: ', args.dataset)
 if args.dataset == 'ModelNet40':
@@ -136,8 +166,40 @@ def test(loader):
         correct += pred.eq(data.y).sum().item()
     return correct / len(loader.dataset)
 
+def _build_stress_loader(root, variant, beta, batch_size):
+    stress_transform = T.Compose([
+        T.SamplePoints(STRESS_DENSE_POINTS),
+        IrregularResample(num_points=NUM_POINTS, bias_strength=float(beta)),
+    ])
+    stress_dataset = ModelNet(root, variant, False, stress_transform,
+                              pre_transform=T.NormalizeScale())
+    return DataLoader(stress_dataset, batch_size=batch_size, shuffle=False,
+                      num_workers=0)
+
+def eval_stress_sweep(root, variant, batch_size):
+    results = {}
+    for beta in STRESS_BETAS:
+        loader = _build_stress_loader(root, variant, beta, batch_size)
+        accs = []
+        for seed in STRESS_SEEDS:
+            def _run():
+                _seed_all(seed)
+                return test(loader)
+            acc = float(_preserve_rng_state(_run))
+            accs.append(acc)
+            print(f"stress beta={beta:.1f} seed={seed} acc={acc:.4f}")
+        mean = float(np.mean(accs)) if accs else 0.0
+        std = float(np.std(accs)) if accs else 0.0
+        results[beta] = (mean, std)
+        print(f"stress beta={beta:.1f} mean={mean:.4f} std={std:.4f}")
+    return results
+
 for epoch in range(1, num_epochs):
     loss = train()
     test_acc = test(test_loader)
     print(f'Epoch {epoch:03d}, Loss: {loss:.4f}, Test: {test_acc:.4f}')
     scheduler.step()
+
+if RUN_STRESS_EVAL and args.dataset in {"ModelNet10", "ModelNet40"}:
+    variant = "10" if args.dataset == "ModelNet10" else "40"
+    eval_stress_sweep(root, variant, batch_size)
