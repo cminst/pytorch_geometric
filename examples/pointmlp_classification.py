@@ -1,4 +1,5 @@
 import argparse
+import importlib.util
 import os.path as osp
 import random
 import sys
@@ -16,14 +17,29 @@ _ROOT = osp.join(osp.dirname(osp.realpath(__file__)), '..')
 _POINTMLP_ROOT = osp.join(_ROOT, 'pointMLP-pytorch')
 _POINTMLP_MODELS = osp.join(_POINTMLP_ROOT, 'classification_ModelNet40')
 _POINTNET2_OPS = osp.join(_POINTMLP_ROOT, 'pointnet2_ops_lib')
-for _path in [_POINTMLP_MODELS, _POINTNET2_OPS]:
+for _path in [_POINTNET2_OPS, _POINTMLP_MODELS]:
     if _path not in sys.path:
         sys.path.insert(0, _path)
 
-_BENCH_POINTS = osp.join(_ROOT, 'benchmark', 'points')
-if _BENCH_POINTS not in sys.path:
-    sys.path.insert(0, _BENCH_POINTS)
-from utils.transforms import IrregularResample
+_BENCH_TRANSFORMS = osp.join(_ROOT, 'benchmark', 'points', 'utils',
+                             'transforms.py')
+if not osp.isfile(_BENCH_TRANSFORMS):
+    raise FileNotFoundError(
+        f"Missing benchmark transforms at {_BENCH_TRANSFORMS}."
+    )
+
+
+def _load_irregular_resample():
+    spec = importlib.util.spec_from_file_location("bench_transforms",
+                                                  _BENCH_TRANSFORMS)
+    if spec is None or spec.loader is None:
+        raise ImportError("Failed to load benchmark transforms module.")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module.IrregularResample
+
+
+IrregularResample = _load_irregular_resample()
 
 try:
     import pointnet2_ops  # noqa: F401
