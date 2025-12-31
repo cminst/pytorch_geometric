@@ -31,12 +31,16 @@ pnpp_accuracies = [87.34, 83.91, 77.50, 67.6, 56.97]
 # DGCNN
 dgcnn_accuracies = [88.85, 83.93, 73.12, 60.00, 49.52]
 
+# PointMLP
+pointmlp_accuracies = [89.94, 87.24, 77.63, 62.24, 48.31]
+
 # Create the plot
 plt.figure(figsize=(10, 6))
 pw_color = "#4C78A8"
 umc_color = "#2B6CB0"
-pnpp_color = "#7F7F7F"
-dgcnn_color = "#404040"
+pnpp_color = "#F28E2B"
+dgcnn_color = "#59A14F"
+pointmlp_color = "#E15759"
 plt.plot(
     betas,
     pw_accuracies,
@@ -83,6 +87,15 @@ plt.plot(
     linewidth=2,
     markersize=7,
     color=dgcnn_color,
+)
+plt.plot(
+    betas,
+    pointmlp_accuracies,
+    "P-",
+    label="PointMLP",
+    linewidth=2,
+    markersize=7,
+    color=pointmlp_color,
 )
 
 # Draw arrows from PointWavelet to PointWavelet + UMC at each beta (skip beta=1).
