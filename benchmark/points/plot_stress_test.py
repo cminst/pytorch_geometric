@@ -104,6 +104,7 @@ for beta, pw_acc, umc_acc in zip(betas, pw_accuracies, umc_accuracies):
         textcoords="offset points",
         color="#2ca02c",
         fontsize=10,
+        fontweight='bold',
         ha="left",
         va="bottom",
         bbox=dict(boxstyle="round,pad=0.2", fc="white", ec="#2ca02c", lw=0.8, alpha=0.9),
