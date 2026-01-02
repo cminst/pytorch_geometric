@@ -54,8 +54,8 @@ DATASET_INFO = {
     "ScanObjectNN": {"num_classes": 15},
 }
 
-SCAN_VARIANTS = ["OBJ_ONLY", "PB_T25", "PB_T25_R", "PB_T50_R", "PB_T50_RS"]
-SCAN_SPLITS = ["main_split", "main_split_nobg"]
+SCAN_POINTMLP_VARIANT = "PB_T50_RS"
+SCAN_POINTMLP_SPLIT = "main_split"
 
 
 def _device() -> torch.device:
@@ -325,10 +325,10 @@ def _resolve_dataset_root(data_root: str, dataset_name: str) -> str:
     return os.path.join(data_root, dataset_name)
 
 
-def _build_sampling_transform(dataset_name: str, num_points: int, scan_pointmlp_style: bool):
+def _build_sampling_transform(dataset_name: str, num_points: int):
     if dataset_name in {"ModelNet10", "ModelNet40"}:
         return SamplePoints(num_points)
-    if dataset_name == "ScanObjectNN" and scan_pointmlp_style:
+    if dataset_name == "ScanObjectNN":
         return TakeFirstPoints(num_points)
     return FixedPoints(num_points, replace=False, allow_duplicates=True)
 
@@ -339,8 +339,6 @@ def _load_dataset(
     train: bool,
     transform,
     force_reload: bool,
-    scan_variant: str,
-    scan_split_dir: str,
 ):
     if dataset_name == "ModelNet10":
         return ModelNet(
@@ -367,8 +365,8 @@ def _load_dataset(
             pre_transform=None,
             transform=transform,
             force_reload=force_reload,
-            variant=scan_variant,
-            split_dir=scan_split_dir,
+            variant=SCAN_POINTMLP_VARIANT,
+            split_dir=SCAN_POINTMLP_SPLIT,
         )
     raise ValueError(f"Unknown dataset_name: {dataset_name}. Supported: {list(DATASET_INFO.keys())}")
 
@@ -378,12 +376,9 @@ def build_datasets(
     num_points: int,
     force_reload: bool,
     dataset_name: str,
-    scan_variant: str,
-    scan_split_dir: str,
-    scan_pointmlp_style: bool,
 ) -> Tuple[Dataset, Dataset]:
-    sampling = _build_sampling_transform(dataset_name, num_points, scan_pointmlp_style)
-    if dataset_name == "ScanObjectNN" and scan_pointmlp_style:
+    sampling = _build_sampling_transform(dataset_name, num_points)
+    if dataset_name == "ScanObjectNN":
         train_transform = Compose(
             [
                 sampling,
@@ -413,8 +408,6 @@ def build_datasets(
         train=True,
         transform=train_transform,
         force_reload=force_reload,
-        scan_variant=scan_variant,
-        scan_split_dir=scan_split_dir,
     )
     test_ds = _load_dataset(
         dataset_name=dataset_name,
@@ -422,8 +415,6 @@ def build_datasets(
         train=False,
         transform=test_transform,
         force_reload=force_reload,
-        scan_variant=scan_variant,
-        scan_split_dir=scan_split_dir,
     )
     return train_ds, test_ds
 
@@ -437,11 +428,8 @@ def build_stress_loader(
     batch_size: int,
     force_reload: bool,
     device: torch.device,
-    scan_variant: str,
-    scan_split_dir: str,
-    scan_pointmlp_style: bool,
 ) -> DataLoader:
-    sampling = _build_sampling_transform(dataset_name, dense_points, scan_pointmlp_style)
+    sampling = _build_sampling_transform(dataset_name, dense_points)
     stress_transform = Compose(
         [
             sampling,
@@ -455,8 +443,6 @@ def build_stress_loader(
         train=False,
         transform=stress_transform,
         force_reload=force_reload,
-        scan_variant=scan_variant,
-        scan_split_dir=scan_split_dir,
     )
     return DataLoader(
         stress_ds,
@@ -645,35 +631,11 @@ def parse_args() -> argparse.Namespace:
         help="Dataset name (default: ModelNet40)",
     )
     p.add_argument(
-        "--scan_variant",
-        type=str,
-        default=None,
-        choices=SCAN_VARIANTS,
-        help="ScanObjectNN variant (default: OBJ_ONLY unless --scan_pointmlp_style).",
-    )
-    p.add_argument(
-        "--scan_split_dir",
-        type=str,
-        default=None,
-        choices=SCAN_SPLITS,
-        help="ScanObjectNN split dir (default: main_split_nobg unless --scan_pointmlp_style).",
-    )
-    p.add_argument(
-        "--scan_pointmlp_style",
-        action=argparse.BooleanOptionalAction,
-        default=True,
-        help=(
-            "Match PointMLP ScanObjectNN data pipeline: PB_T50_RS + main_split, "
-            "scale+translate only, no NormalizeScale/Jitter, deterministic first-N points, shuffle. "
-            "(default: True for ScanObjectNN)"
-        ),
-    )
-    p.add_argument(
         "--scan_pointmlp_recipe",
         action=argparse.BooleanOptionalAction,
         default=False,
         help=(
-            "Also match PointMLP training recipe: SGD+cosine, batch=32, lr=0.01, epochs=200. "
+            "Match PointMLP training recipe (ScanObjectNN only): SGD+cosine, batch=32, lr=0.01, epochs=200. "
             "(default: False)"
         ),
     )
@@ -778,28 +740,16 @@ def _resolve_methods(choice: str) -> List[Tuple[str, bool, str]]:
 def main() -> None:
     args = parse_args()
     if args.dataset_name == "ScanObjectNN":
-        if args.scan_pointmlp_style:
-            args.scan_variant = "PB_T50_RS"
-            args.scan_split_dir = "main_split"
-            if args.scan_pointmlp_recipe:
-                # PointMLP training recipe
-                args.batch_size = 32
-                args.lr = 0.01
-                args.epochs = 200
-                args.weight_decay = 1e-4
-                args.optimizer = "sgd"
-                args.scheduler = "cosine"
-                if args.lr_min is None:
-                    args.lr_min = args.lr / 100.0
-        else:
-            if args.scan_variant is None:
-                args.scan_variant = "OBJ_ONLY"
-            if args.scan_split_dir is None:
-                args.scan_split_dir = "main_split_nobg"
-    if args.scan_variant is None:
-        args.scan_variant = "OBJ_ONLY"
-    if args.scan_split_dir is None:
-        args.scan_split_dir = "main_split_nobg"
+        if args.scan_pointmlp_recipe:
+            # PointMLP training recipe
+            args.batch_size = 32
+            args.lr = 0.01
+            args.epochs = 200
+            args.weight_decay = 1e-4
+            args.optimizer = "sgd"
+            args.scheduler = "cosine"
+            if args.lr_min is None:
+                args.lr_min = args.lr / 100.0
 
     device = _device()
     print(f"Device: {device}", flush=True)
@@ -814,9 +764,6 @@ def main() -> None:
         args.num_points,
         force_reload=bool(args.force_reload),
         dataset_name=args.dataset_name,
-        scan_variant=args.scan_variant,
-        scan_split_dir=args.scan_split_dir,
-        scan_pointmlp_style=bool(args.scan_pointmlp_style),
     )
 
     train_loader = DataLoader(
@@ -849,9 +796,6 @@ def main() -> None:
             batch_size=args.batch_size,
             force_reload=bool(args.force_reload),
             device=device,
-            scan_variant=args.scan_variant,
-            scan_split_dir=args.scan_split_dir,
-            scan_pointmlp_style=bool(args.scan_pointmlp_style),
         )
 
     num_classes = DATASET_INFO[args.dataset_name]["num_classes"]
