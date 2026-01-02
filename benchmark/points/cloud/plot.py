@@ -3,13 +3,15 @@ import matplotlib.pyplot as plt
 from matplotlib.ticker import FuncFormatter, LogFormatterMathtext
 
 plt.rcParams.update({
-    "font.size": 14,
-    "axes.titlesize": 16,
-    "axes.labelsize": 14,
-    "xtick.labelsize": 12,
-    "ytick.labelsize": 12,
-    "legend.fontsize": 12,
-    "figure.titlesize": 2
+    'font.size'        : 14,   # base size for most text
+    'axes.titlesize'   : 18,   # title of the axes
+    'axes.labelsize'   : 16,   # x‑ and y‑axis labels
+    'xtick.labelsize'  : 14,   # tick labels on the x axis
+    'ytick.labelsize'  : 14,   # tick labels on the y axis
+    'legend.fontsize'  : 14,   # legend text
+    'figure.titlesize' : 1,    # figure‑level title (suptitle)
+    'font.family'      : "Times New Roman",
+    'mathtext.fontset': 'cm'
 })
 
 LAMBDAS = [0, 0.00001, 0.0001, 0.001, 0.01, 0.1, 1, 10, 100, 1000]
@@ -44,18 +46,19 @@ def make_umc_lambda_plot(train_mode, out_path):
 
     # Make the plot
     fig, ax = plt.subplots(figsize=(6.4, 4.8))
-    ax.errorbar(lam_plot, mean, yerr=std, fmt="o-", capsize=4)
+    ax.plot(lam_plot, mean, "o-")
 
     ax.set_xscale("log")
     ax.set_xlabel(r"$\lambda_{\mathrm{ortho}}$")
     ax.set_ylabel("Test accuracy (%)")
-    ax.set_title("ModelNet40 Performance vs. $\lambda_{\mathrm{ortho}}$")
+    ax.set_title("ModelNet40 Performance vs. $\lambda_{\mathrm{ortho}}$", fontweight='bold')
 
     unique_lam = np.unique(lam)
     real_pos = sorted(v for v in unique_lam if v > 0)
     xticks = [eps] + real_pos
     ax.set_xticks(xticks)
-    ax.set_ylim(79.2-9.67,86-8.07)
+    ax.set_ylim(71,76.5)
+    ax.grid(True, alpha=0.3, linestyle="--")
     log_formatter = LogFormatterMathtext(labelOnlyBase=False)
     def tick_label(val, _):
         if np.isclose(val, eps):
@@ -63,7 +66,7 @@ def make_umc_lambda_plot(train_mode, out_path):
         return log_formatter(val)
     ax.xaxis.set_major_formatter(FuncFormatter(tick_label))
 
-    fig.tight_layout()
+    fig.subplots_adjust(left=0.12, right=0.98, top=0.88, bottom=0.15)
     fig.savefig(out_path, dpi=300)
     print(f"Saved {train_mode} plot to: {out_path}")
 
