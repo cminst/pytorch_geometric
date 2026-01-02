@@ -42,6 +42,8 @@ class SAWaveletConfig:
     wf_learnable: bool = False
     wf_beta: float = 0.05
     wf_sigma_mode: str = "mean"
+    wf_chunk_size: Optional[int] = None
+    wf_force_math_attn: bool = False
 
     # Universal Measure Correction (UMC)
     wf_use_umc: bool = False
@@ -93,8 +95,10 @@ class PointNetSetAbstractionWavelet(nn.Module):
                 sigma_mode=cfg.wf_sigma_mode,
                 learnable=cfg.wf_learnable,
                 beta=cfg.wf_beta,
+                chunk_size=cfg.wf_chunk_size,
                 depth=cfg.wf_depth,
                 num_heads=cfg.wf_heads,
+                force_math_attn=cfg.wf_force_math_attn,
                 use_umc=cfg.wf_use_umc,
                 umc_hidden=cfg.wf_umc_hidden,
                 umc_knn=cfg.wf_umc_knn,
