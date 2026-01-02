@@ -1,1 +1,3 @@
 #2 pointcloud_optimizations - This pull request introduces several improvements to the 3D point cloud experiment pipeline, focusing on dataset flexibility, data loading efficiency, and data augmentation capabilities. The most significant changes include a major refactor of the `ScanObjectNN` dataset class to support multiple variants, the addition of an affine augmentation transform, and new options for caching and parallelizing data loading to speed up preprocessing and evaluation.
+
+#8 pointwavelet_scanobjectnn - This pull request adds ScanObjectNN support to the umc_pointwavelet.py script with the PointMLP data preprocessing recipe.
