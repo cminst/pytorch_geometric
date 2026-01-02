@@ -1,5 +1,5 @@
 <p align="center">
-  <img width="500" src="https://github.com/user-attachments/assets/1b7f74f8-4236-4a47-baf8-91dc36933869" alt="PyTorch Geometric Logo" />
+  <img width="500" src="https://github.com/user-attachments/assets/98fe34a8-694a-4c23-98e7-98e67e17b849" alt="PyTorch Geometric Logo" />
 </p>
 
 <p align="center">
