@@ -44,6 +44,7 @@ from utils.transforms import (
     IrregularResample,
     PointJitter,
     PointMLPAffine,
+    RandomIrregularResample,
     RandomShufflePoints,
     TakeFirstPoints,
 )
@@ -56,6 +57,8 @@ DATASET_INFO = {
 
 SCAN_POINTMLP_VARIANT = "PB_T50_RS"
 SCAN_POINTMLP_SPLIT = "main_split"
+TRAIN_AUG_MAX_BIAS = 4.0
+TRAIN_AUG_DENSE_POINTS = 2048
 
 
 def _device() -> torch.device:
@@ -376,32 +379,64 @@ def build_datasets(
     num_points: int,
     force_reload: bool,
     dataset_name: str,
+    train_mode: str,
 ) -> Tuple[Dataset, Dataset]:
-    sampling = _build_sampling_transform(dataset_name, num_points)
-    if dataset_name == "ScanObjectNN":
-        train_transform = Compose(
-            [
-                sampling,
-                PointMLPAffine(),
-                RandomShufflePoints(),
-            ]
-        )
-        test_transform = Compose([sampling])
+    if train_mode == "aug":
+        if dataset_name in {"ModelNet10", "ModelNet40"}:
+            sampling = SamplePoints(TRAIN_AUG_DENSE_POINTS)
+            train_transform = Compose(
+                [
+                    sampling,
+                    RandomIrregularResample(
+                        num_points=num_points,
+                        max_bias=TRAIN_AUG_MAX_BIAS,
+                    ),
+                    NormalizeScale(),
+                    PointMLPAffine(),
+                    PointJitter(),
+                ]
+            )
+            test_sampling = _build_sampling_transform(dataset_name, num_points)
+            test_transform = Compose([test_sampling, NormalizeScale()])
+        else:
+            train_transform = Compose(
+                [
+                    RandomIrregularResample(
+                        num_points=num_points,
+                        max_bias=TRAIN_AUG_MAX_BIAS,
+                    ),
+                    PointMLPAffine(),
+                    RandomShufflePoints(),
+                ]
+            )
+            test_sampling = _build_sampling_transform(dataset_name, num_points)
+            test_transform = Compose([test_sampling])
     else:
-        train_transform = Compose(
-            [
-                sampling,
-                NormalizeScale(),
-                PointMLPAffine(),
-                PointJitter(),
-            ]
-        )
-        test_transform = Compose(
-            [
-                sampling,
-                NormalizeScale(),
-            ]
-        )
+        sampling = _build_sampling_transform(dataset_name, num_points)
+        if dataset_name == "ScanObjectNN":
+            train_transform = Compose(
+                [
+                    sampling,
+                    PointMLPAffine(),
+                    RandomShufflePoints(),
+                ]
+            )
+            test_transform = Compose([sampling])
+        else:
+            train_transform = Compose(
+                [
+                    sampling,
+                    NormalizeScale(),
+                    PointMLPAffine(),
+                    PointJitter(),
+                ]
+            )
+            test_transform = Compose(
+                [
+                    sampling,
+                    NormalizeScale(),
+                ]
+            )
     train_ds = _load_dataset(
         dataset_name=dataset_name,
         root=root,
@@ -639,6 +674,13 @@ def parse_args() -> argparse.Namespace:
     )
     p.add_argument("--force_reload", action="store_true", help="Force reprocessing the dataset")
     p.add_argument("--num_points", type=int, default=1024, help="Number of points to sample (default: 1024)")
+    p.add_argument(
+        "--train_mode",
+        type=str,
+        default="clean",
+        choices=["clean", "aug"],
+        help="Training transform: clean or aug (IrregularResample with beta~U[0,4])",
+    )
     p.add_argument("--batch_size", type=int, default=16, help="Batch size for DataLoaders (default: 16)")
     p.add_argument("--num_workers", type=int, default=4, help="Number of workers for DataLoaders (default: 4)")
     p.add_argument("--epochs", type=int, default=200, help="Number of training epochs (default: 200)")
@@ -749,6 +791,7 @@ def main() -> None:
         args.num_points,
         force_reload=bool(args.force_reload),
         dataset_name=args.dataset_name,
+        train_mode=str(args.train_mode),
     )
 
     train_loader = DataLoader(
