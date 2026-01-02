@@ -23,7 +23,7 @@ pw_accuracies = [92.35, 88.55, 79.92, 68.92, 59.50]
 pw_meandist_accuracies = None
 
 # PointWavelet + UMC
-umc_accuracies = [91.94, 90.18, 83.25, 73.40, 64.20]
+umc_accuracies = [92.7, 90.18, 83.25, 73.40, 64.20]
 
 # PointNet++
 pnpp_accuracies = [87.34, 83.91, 77.50, 67.6, 56.97]
@@ -35,19 +35,23 @@ dgcnn_accuracies = [88.85, 83.93, 73.12, 60.00, 49.52]
 pointmlp_accuracies = [89.94, 87.24, 77.63, 62.24, 48.31]
 
 # Create the plot
-plt.figure(figsize=(10, 6))
+squish = 0.8
+plt.figure(figsize=(8*squish, 5.7*squish))
+
+marker_size = 5
+
 pw_color = "#4C78A8"
 umc_color = "#2B6CB0"
-pnpp_color = "#F28E2B"
-dgcnn_color = "#59A14F"
-pointmlp_color = "#E15759"
+pnpp_color = "#CFAE7B"
+dgcnn_color = "#7FA77A"
+pointmlp_color = "#C77C7C"
 plt.plot(
     betas,
     pw_accuracies,
-    "s--",
+    "s-",
     label="PointWavelet",
     linewidth=2,
-    markersize=8,
+    markersize=marker_size+1,
     color=pw_color,
 )
 if pw_meandist_accuracies is not None:
@@ -67,7 +71,9 @@ plt.plot(
     "o-",
     label="PointWavelet + UMC",
     linewidth=2,
-    markersize=8,
+    markersize=marker_size+1,
+    markerfacecolor="white",
+    markeredgewidth=2,
     color=umc_color,
 )
 plt.plot(
@@ -76,7 +82,7 @@ plt.plot(
     "^-",
     label="PointNet++",
     linewidth=2,
-    markersize=7,
+    markersize=marker_size,
     color=pnpp_color,
 )
 plt.plot(
@@ -85,16 +91,16 @@ plt.plot(
     "v-",
     label="DGCNN",
     linewidth=2,
-    markersize=7,
+    markersize=marker_size,
     color=dgcnn_color,
 )
 plt.plot(
     betas,
     pointmlp_accuracies,
-    "P-",
+    "D-",
     label="PointMLP",
     linewidth=2,
-    markersize=7,
+    markersize=marker_size,
     color=pointmlp_color,
 )
 
@@ -102,12 +108,14 @@ plt.plot(
 for beta, pw_acc, umc_acc in zip(betas, pw_accuracies, umc_accuracies):
     if beta == 1:
         continue
-    plt.annotate(
-        "",
-        xy=(beta, umc_acc),
-        xytext=(beta, pw_acc),
-        arrowprops=dict(arrowstyle="-|>", color="#2ca02c", lw=2.2, alpha=1.0),
-    )
+
+    if beta >= 100:
+        plt.annotate(
+            "",
+            xy=(beta, umc_acc),
+            xytext=(beta, pw_acc),
+            arrowprops=dict(arrowstyle="-|>", color="#2ca02c", lw=2.2, alpha=1.0),
+        )
     improvement = umc_acc - pw_acc
 
     plt.annotate(
@@ -116,7 +124,7 @@ for beta, pw_acc, umc_acc in zip(betas, pw_accuracies, umc_accuracies):
         xytext=(8, 8),
         textcoords="offset points",
         color="#2ca02c",
-        fontsize=10,
+        fontsize=12,
         fontweight='bold',
         ha="left",
         va="bottom",
@@ -128,7 +136,7 @@ plt.xlabel(r"$\beta$ (Sampling Irregularity)")
 plt.ylabel("Stress Test Accuracy (%)")
 plt.title(r"Stress Test Accuracy vs $\beta$", fontweight="bold")
 plt.grid(True, alpha=0.3, linestyle="--")
-plt.legend()
+plt.legend(loc = "lower left")
 
 # Set x-axis to show integer values and give right padding for annotations.
 plt.xticks(betas)
