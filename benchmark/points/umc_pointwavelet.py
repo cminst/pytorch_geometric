@@ -31,23 +31,11 @@ import torch.nn.functional as F
 from torch.utils.data import DataLoader, Dataset
 
 from torch_geometric.datasets import ModelNet
-from torch_geometric.transforms import (
-    Compose,
-    FixedPoints,
-    NormalizeScale,
-    SamplePoints,
-)
+from torch_geometric.transforms import Compose, NormalizeScale, SamplePoints
 
 from pointwavelet import PointWaveletClassifier, PointWaveletClsConfig
 from utils.custom_datasets import ScanObjectNN
-from utils.transforms import (
-    IrregularResample,
-    PointJitter,
-    PointMLPAffine,
-    RandomIrregularResample,
-    RandomShufflePoints,
-    TakeFirstPoints,
-)
+from utils.transforms import IrregularResample, RandomIrregularResample
 
 DATASET_INFO = {
     "ModelNet10": {"num_classes": 10},
@@ -328,19 +316,12 @@ def _resolve_dataset_root(data_root: str, dataset_name: str) -> str:
     return os.path.join(data_root, dataset_name)
 
 
-def _build_sampling_transform(dataset_name: str, num_points: int):
-    if dataset_name in {"ModelNet10", "ModelNet40"}:
-        return SamplePoints(num_points)
-    if dataset_name == "ScanObjectNN":
-        return TakeFirstPoints(num_points)
-    return FixedPoints(num_points, replace=False, allow_duplicates=True)
-
-
 def _load_dataset(
     dataset_name: str,
     root: str,
     train: bool,
     transform,
+    pre_transform,
     force_reload: bool,
 ):
     if dataset_name == "ModelNet10":
@@ -348,7 +329,7 @@ def _load_dataset(
             root=root,
             name="10",
             train=train,
-            pre_transform=None,
+            pre_transform=pre_transform,
             transform=transform,
             force_reload=force_reload,
         )
@@ -357,7 +338,7 @@ def _load_dataset(
             root=root,
             name="40",
             train=train,
-            pre_transform=None,
+            pre_transform=pre_transform,
             transform=transform,
             force_reload=force_reload,
         )
@@ -365,7 +346,7 @@ def _load_dataset(
         return ScanObjectNN(
             root=root,
             train=train,
-            pre_transform=None,
+            pre_transform=pre_transform,
             transform=transform,
             force_reload=force_reload,
             variant=SCAN_POINTMLP_VARIANT,
@@ -381,67 +362,44 @@ def build_datasets(
     dataset_name: str,
     train_mode: str,
 ) -> Tuple[Dataset, Dataset]:
-    if train_mode == "aug":
-        if dataset_name in {"ModelNet10", "ModelNet40"}:
-            sampling = SamplePoints(TRAIN_AUG_DENSE_POINTS)
+    pre_transform = NormalizeScale()
+    if dataset_name in {"ModelNet10", "ModelNet40"}:
+        if train_mode == "aug":
             train_transform = Compose(
                 [
-                    sampling,
+                    SamplePoints(TRAIN_AUG_DENSE_POINTS),
                     RandomIrregularResample(
                         num_points=num_points,
                         max_bias=TRAIN_AUG_MAX_BIAS,
                     ),
-                    NormalizeScale(),
-                    PointMLPAffine(),
-                    PointJitter(),
                 ]
             )
-            test_sampling = _build_sampling_transform(dataset_name, num_points)
-            test_transform = Compose([test_sampling, NormalizeScale()])
         else:
-            train_transform = Compose(
-                [
-                    RandomIrregularResample(
-                        num_points=num_points,
-                        max_bias=TRAIN_AUG_MAX_BIAS,
-                    ),
-                    PointMLPAffine(),
-                    RandomShufflePoints(),
-                ]
-            )
-            test_sampling = _build_sampling_transform(dataset_name, num_points)
-            test_transform = Compose([test_sampling])
+            train_transform = Compose([SamplePoints(num_points)])
+        test_transform = Compose([SamplePoints(num_points)])
     else:
-        sampling = _build_sampling_transform(dataset_name, num_points)
-        if dataset_name == "ScanObjectNN":
+        if train_mode == "aug":
             train_transform = Compose(
                 [
-                    sampling,
-                    PointMLPAffine(),
-                    RandomShufflePoints(),
+                    RandomIrregularResample(
+                        num_points=num_points,
+                        max_bias=TRAIN_AUG_MAX_BIAS,
+                    ),
                 ]
             )
-            test_transform = Compose([sampling])
         else:
             train_transform = Compose(
-                [
-                    sampling,
-                    NormalizeScale(),
-                    PointMLPAffine(),
-                    PointJitter(),
-                ]
+                [IrregularResample(num_points=num_points, bias_strength=0.0)]
             )
-            test_transform = Compose(
-                [
-                    sampling,
-                    NormalizeScale(),
-                ]
-            )
+        test_transform = Compose(
+            [IrregularResample(num_points=num_points, bias_strength=0.0)]
+        )
     train_ds = _load_dataset(
         dataset_name=dataset_name,
         root=root,
         train=True,
         transform=train_transform,
+        pre_transform=pre_transform,
         force_reload=force_reload,
     )
     test_ds = _load_dataset(
@@ -449,6 +407,7 @@ def build_datasets(
         root=root,
         train=False,
         transform=test_transform,
+        pre_transform=pre_transform,
         force_reload=force_reload,
     )
     return train_ds, test_ds
@@ -464,19 +423,24 @@ def build_stress_loader(
     force_reload: bool,
     device: torch.device,
 ) -> DataLoader:
-    sampling = _build_sampling_transform(dataset_name, dense_points)
-    stress_transform = Compose(
-        [
-            sampling,
-            NormalizeScale(),
-            IrregularResample(num_points=num_points, bias_strength=bias_strength),
-        ]
-    )
+    pre_transform = NormalizeScale()
+    if dataset_name in {"ModelNet10", "ModelNet40"}:
+        stress_transform = Compose(
+            [
+                SamplePoints(dense_points),
+                IrregularResample(num_points=num_points, bias_strength=bias_strength),
+            ]
+        )
+    else:
+        stress_transform = Compose(
+            [IrregularResample(num_points=num_points, bias_strength=bias_strength)]
+        )
     stress_ds = _load_dataset(
         dataset_name=dataset_name,
         root=root,
         train=False,
         transform=stress_transform,
+        pre_transform=pre_transform,
         force_reload=force_reload,
     )
     return DataLoader(
