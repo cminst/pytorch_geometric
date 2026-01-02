@@ -1,5 +1,9 @@
+import argparse
 import os.path as osp
+import random
+import sys
 
+import numpy as np
 import torch
 import torch.nn.functional as F
 from torch.nn import Linear as Lin
@@ -18,15 +22,63 @@ from torch_geometric.nn import (
 from torch_geometric.typing import WITH_TORCH_CLUSTER
 from torch_geometric.utils import scatter
 
+_ROOT = osp.join(osp.dirname(osp.realpath(__file__)), '..')
+_BENCH_POINTS = osp.join(_ROOT, 'benchmark', 'points')
+if _BENCH_POINTS not in sys.path:
+    sys.path.insert(0, _BENCH_POINTS)
+if _ROOT not in sys.path:
+    sys.path.insert(0, _ROOT)
+from utils.transforms import IrregularResample
+
 if not WITH_TORCH_CLUSTER:
     quit("This example requires 'torch-cluster'")
 
-path = osp.join(osp.dirname(osp.realpath(__file__)), '..', 'data/ModelNet10')
-pre_transform, transform = T.NormalizeScale(), T.SamplePoints(1024)
-train_dataset = ModelNet(path, '10', True, transform, pre_transform)
-test_dataset = ModelNet(path, '10', False, transform, pre_transform)
-train_loader = DataLoader(train_dataset, batch_size=32, shuffle=True)
-test_loader = DataLoader(test_dataset, batch_size=32, shuffle=False)
+parser = argparse.ArgumentParser(
+    formatter_class=argparse.ArgumentDefaultsHelpFormatter, )
+parser.add_argument(
+    '--dataset',
+    type=str,
+    default='ModelNet10',
+    choices=['ModelNet10', 'ModelNet40'],
+    help='Dataset name.',
+)
+parser.add_argument(
+    '--dataset_dir',
+    type=str,
+    default='./data',
+    help='Root directory of dataset.',
+)
+parser.add_argument('--batch_size', type=int, default=32)
+parser.add_argument('--num_workers', type=int, default=6)
+parser.add_argument('--epochs', type=int, default=200)
+
+NUM_POINTS = 1024
+STRESS_DENSE_POINTS = 2048
+STRESS_BETAS = [0, 1, 2, 3, 4, 5]
+STRESS_SEEDS = list(range(1, 11))
+RUN_STRESS_EVAL = True
+
+def _seed_all(seed: int) -> None:
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
+
+def _preserve_rng_state(fn):
+    state = {
+        "py": random.getstate(),
+        "np": np.random.get_state(),
+        "torch": torch.random.get_rng_state(),
+        "cuda": torch.cuda.get_rng_state_all() if torch.cuda.is_available() else None,
+    }
+    try:
+        return fn()
+    finally:
+        random.setstate(state["py"])
+        np.random.set_state(state["np"])
+        torch.random.set_rng_state(state["torch"])
+        if state["cuda"] is not None:
+            torch.cuda.set_rng_state_all(state["cuda"])
 
 
 class TransformerBlock(torch.nn.Module):
@@ -167,8 +219,51 @@ def test(loader):
         correct += pred.eq(data.y).sum().item()
     return correct / len(loader.dataset)
 
+def _build_stress_loader(root, variant, beta, batch_size):
+    stress_transform = T.Compose([
+        T.SamplePoints(STRESS_DENSE_POINTS),
+        IrregularResample(num_points=NUM_POINTS, bias_strength=float(beta)),
+    ])
+    stress_dataset = ModelNet(root, variant, False, stress_transform,
+                              pre_transform=T.NormalizeScale())
+    return DataLoader(stress_dataset, batch_size=batch_size, shuffle=False,
+                      num_workers=0)
+
+def eval_stress_sweep(root, variant, batch_size):
+    results = {}
+    for beta in STRESS_BETAS:
+        loader = _build_stress_loader(root, variant, beta, batch_size)
+        accs = []
+        for seed in STRESS_SEEDS:
+            def _run():
+                _seed_all(seed)
+                return test(loader)
+            acc = float(_preserve_rng_state(_run))
+            accs.append(acc)
+            print(f"stress beta={beta:.1f} seed={seed} acc={acc:.4f}")
+        mean = float(np.mean(accs)) if accs else 0.0
+        std = float(np.std(accs)) if accs else 0.0
+        results[beta] = (mean, std)
+        print(f"stress beta={beta:.1f} mean={mean:.4f} std={std:.4f}")
+    return results
+
 
 if __name__ == '__main__':
+    args = parser.parse_args()
+
+    num_epochs = args.epochs
+    num_workers = args.num_workers
+    batch_size = args.batch_size
+    root = osp.join(args.dataset_dir, args.dataset)
+    variant = '10' if args.dataset == 'ModelNet10' else '40'
+
+    pre_transform, transform = T.NormalizeScale(), T.SamplePoints(NUM_POINTS)
+    train_dataset = ModelNet(root, variant, True, transform, pre_transform)
+    test_dataset = ModelNet(root, variant, False, transform, pre_transform)
+    train_loader = DataLoader(train_dataset, batch_size=batch_size,
+                              shuffle=True, num_workers=num_workers)
+    test_loader = DataLoader(test_dataset, batch_size=batch_size,
+                             shuffle=False, num_workers=num_workers)
 
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     model = Net(0, train_dataset.num_classes,
@@ -177,8 +272,11 @@ if __name__ == '__main__':
     scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=20,
                                                 gamma=0.5)
 
-    for epoch in range(1, 201):
+    for epoch in range(1, num_epochs + 1):
         loss = train()
         test_acc = test(test_loader)
         print(f'Epoch {epoch:03d}, Loss: {loss:.4f}, Test: {test_acc:.4f}')
         scheduler.step()
+
+    if RUN_STRESS_EVAL:
+        eval_stress_sweep(root, variant, batch_size=batch_size)

@@ -24,11 +24,13 @@ coverage.xml
 *.out
 *.pt
 *.onnx
+*AGENTS.md
 examples/**/*.png
 examples/**/*.pdf
 benchmark/results/
 .mypy_cache/
 uv.lock
+*.tex
 
 !torch_geometric/data/
 !test/data/

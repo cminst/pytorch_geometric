@@ -1,261 +1,47 @@
 import argparse
-import copy
 import os
 import time
-from typing import Callable, Optional
+from typing import Optional
 
 import pandas as pd
 import torch
-from torch.utils.data import Subset
-from torch_geometric.data import Batch
-from torch_geometric.datasets import ModelNet
+import torch.nn.functional as F
 from torch_geometric.loader import DataLoader
-from torch_geometric.transforms import (
-    Compose,
-    KNNGraph,
-    NormalizeScale,
-    SamplePoints,
+from utils.datasets import (
+    DATASET_INFO,
+    build_pre_transform,
+    build_stress_transform,
+    build_test_transform_clean,
+    build_train_transform_aug,
+    build_train_transform_clean,
+    cache_dataset,
+    load_dataset,
+    make_loaders,
 )
-from umc_pointcloud_utils import (
-    ComputePhiRWFromSym,
-    CopyCategoryToY,
+from utils.models import (
     ExtraCapacityControl,
     FixedDegreeClassifier,
     InvDegreeHeuristicClassifier,
-    IrregularResample,
-    MakeUndirected,
     MeanDistHeuristicClassifier,
     NoWeightClassifier,
-    PointMLPAffine,
-    RandomIrregularResample,
-    TrainConfig,
     UMCClassifier,
+    format_duration,
+    seed_everything,
+)
+from utils.training import (
+    TrainConfig,
     eval_accuracy,
     eval_feature_stability,
     eval_weight_correlations,
-    seed_everything,
+    split_train_val,
     train_model,
 )
 
-from datasets import ScanObjectNN
-
 # ----------------------------
-# Dataset Registry
+# Model defaults
 # ----------------------------
 
-DATASET_INFO = {
-    "ModelNet10": {
-        "num_classes": 10
-    },
-    "ModelNet40": {
-        "num_classes": 40
-    },
-    "ScanObjectNN": {
-        "num_classes": 15
-    },
-}
-
-
-def load_dataset(
-    name: str,
-    root: str,
-    train: bool,
-    pre_transform: Optional[Callable],
-    transform: Optional[Callable],
-    force_reload: bool = False,
-):
-    """Load a dataset by name.
-
-    Args:
-        name: One of 'ModelNet10', 'ModelNet40', 'ScanObjectNN'
-        root: Root directory for data
-        train: If True, load training split; else test split
-        pre_transform: Pre-transform to apply (cached)
-        transform: Transform to apply on access
-        force_reload: Whether to reprocess the dataset
-
-    Returns:
-        Dataset instance
-    """
-    if name == "ModelNet10":
-        return ModelNet(
-            root=root,
-            name="10",
-            train=train,
-            pre_transform=pre_transform,
-            transform=transform,
-            force_reload=force_reload,
-        )
-    elif name == "ModelNet40":
-        return ModelNet(
-            root=root,
-            name="40",
-            train=train,
-            pre_transform=pre_transform,
-            transform=transform,
-            force_reload=force_reload,
-        )
-    elif name == "ScanObjectNN":
-        return ScanObjectNN(
-            root=root,
-            train=train,
-            pre_transform=pre_transform,
-            transform=transform,
-            force_reload=force_reload,
-            variant="OBJ_ONLY",
-        )
-    else:
-        raise ValueError(f"Unknown dataset: {name}. Supported: {list(DATASET_INFO.keys())}")
-
-
-def build_pre_transform(dataset_name: str, dense_points: int) -> Compose:
-    """Build pre_transform pipeline (applied once and cached)."""
-    transforms = []
-
-    # ScanObjectNN already comes with 2048-point clouds; skip sampling there.
-    if dataset_name != "ScanObjectNN":
-        transforms.append(SamplePoints(dense_points))
-
-    transforms.append(NormalizeScale())
-
-    return Compose(transforms)
-
-
-def build_train_transform_clean(
-    num_points: int,
-    knn_k: int,
-    K: int,
-    augment_affine: bool = False,
-) -> Compose:
-    """Build clean (uniform) training transform."""
-    transforms = [IrregularResample(num_points=num_points, bias_strength=0.0)]
-    if augment_affine:
-        transforms.append(PointMLPAffine())
-    transforms.extend([
-        NormalizeScale(),
-        KNNGraph(k=knn_k),
-        MakeUndirected(),
-        ComputePhiRWFromSym(K=K, store_aux=True),
-    ])
-    return Compose(transforms)
-
-
-def build_train_transform_aug(
-    num_points: int,
-    knn_k: int,
-    K: int,
-    max_bias: float,
-    augment_affine: bool = False,
-) -> Compose:
-    """Build augmented (random bias) training transform."""
-    transforms = [RandomIrregularResample(num_points=num_points, max_bias=max_bias)]
-    if augment_affine:
-        transforms.append(PointMLPAffine())
-    transforms.extend([
-        NormalizeScale(),
-        KNNGraph(k=knn_k),
-        MakeUndirected(),
-        ComputePhiRWFromSym(K=K, store_aux=True),
-    ])
-    return Compose(transforms)
-
-
-def build_test_transform_clean(
-    num_points: int,
-    knn_k: int,
-    K: int
-) -> Compose:
-    """Build clean (uniform) test transform."""
-    transforms = [
-        IrregularResample(num_points=num_points, bias_strength=0.0),
-        NormalizeScale(),
-        KNNGraph(k=knn_k),
-        MakeUndirected(),
-        ComputePhiRWFromSym(K=K, store_aux=True),
-    ]
-    return Compose(transforms)
-
-
-def build_stress_transform(
-    num_points: int,
-    knn_k: int,
-    K: int,
-    bias_strength: float
-) -> Compose:
-    """Build stress test transform with specific bias level."""
-    transforms = [
-        IrregularResample(num_points=num_points, bias_strength=bias_strength),
-        NormalizeScale(),
-        KNNGraph(k=knn_k),
-        MakeUndirected(),
-        ComputePhiRWFromSym(K=K, store_aux=True),
-    ]
-    return Compose(transforms)
-
-
-# ----------------------------
-# Helper Functions
-# ----------------------------
-
-def split_train_val(ds, val_ratio: float, seed: int):
-    n = len(ds)
-    n_val = int(round(n * val_ratio))
-    idx = torch.randperm(n, generator=torch.Generator().manual_seed(seed)).tolist()
-    val_idx = idx[:n_val]
-    train_idx = idx[n_val:]
-    return Subset(ds, train_idx), Subset(ds, val_idx)
-
-
-class CachedDataset:
-    """Simple dataset wrapper that returns deep copies of preprocessed items."""
-    def __init__(self, data_list):
-        self.data_list = data_list
-
-    def __len__(self):
-        return len(self.data_list)
-
-    def __getitem__(self, idx):
-        return copy.deepcopy(self.data_list[idx])
-
-
-def cache_dataset(dataset, num_workers: int = 0):
-    """Materialize a dataset once so we can reuse expensive transforms."""
-    if len(dataset) == 0:
-        return CachedDataset([])
-
-    persistent_workers = num_workers > 0
-    loader = DataLoader(
-        dataset,
-        batch_size=1,
-        shuffle=False,
-        drop_last=False,
-        num_workers=num_workers,
-        persistent_workers=persistent_workers,
-    )
-    cached = []
-    for batch in loader:
-        if isinstance(batch, Batch):
-            cached.extend(batch.to_data_list())
-        else:
-            cached.append(batch)
-    return CachedDataset(cached)
-
-
-def make_loaders(train_ds, val_ds, test_ds, batch_size: int, seed: int, drop_last_train: bool = True, num_workers: int = 0):
-    persistent_workers = num_workers > 0
-    g = torch.Generator().manual_seed(seed)
-    train_loader = DataLoader(
-        train_ds,
-        batch_size=batch_size,
-        shuffle=True,
-        drop_last=drop_last_train,
-        generator=g,
-        num_workers=num_workers,
-        persistent_workers=persistent_workers,
-    )
-    val_loader   = DataLoader(val_ds,   batch_size=batch_size, shuffle=False, drop_last=False, num_workers=num_workers, persistent_workers=persistent_workers)
-    test_loader  = DataLoader(test_ds,  batch_size=batch_size, shuffle=False, drop_last=False, num_workers=num_workers, persistent_workers=persistent_workers)
-    return train_loader, val_loader, test_loader
+METHODS_REQUIRING_PHI = {"naive", "deg", "invdeg", "meandist", "cap", "umc"}
 
 
 @torch.no_grad()
@@ -272,6 +58,8 @@ def eval_stress_table(
     batch_size: int,
     seed: int,
     num_workers: int = 0,
+    phi_device: Optional[str] = None,
+    include_phi: bool = True,
 ):
     """Evaluate accuracy across bias levels with deterministic corruption per (seed, bias)."""
     out = {}
@@ -284,7 +72,9 @@ def eval_stress_table(
             num_points=num_points,
             knn_k=knn_k,
             K=K,
-            bias_strength=float(bias)
+            bias_strength=float(bias),
+            include_phi=include_phi,
+            phi_device=phi_device,
         )
 
         ds = load_dataset(
@@ -318,6 +108,7 @@ def main():
     ap.add_argument("--dense_points", type=int, default=2048)
     ap.add_argument("--K", type=int, default=64)
     ap.add_argument("--knn_k", type=int, default=20)
+    ap.add_argument("--phi_device", type=str, default=None, help="Device for torch.linalg.eigh when computing phi (e.g., 'cuda'). Defaults to the data tensor device.")
     ap.add_argument("--batch_size", type=int, default=16)
     ap.add_argument("--epochs", type=int, default=30)
     ap.add_argument("--lr", type=float, default=1e-3)
@@ -343,9 +134,11 @@ def main():
     ap.add_argument("--num_workers", type=int, default=0, help="DataLoader workers for train/eval (0 keeps everything on the main process).")
     ap.add_argument("--torch_threads", type=int, default=None, help="Optional cap on torch threads to avoid overusing CPU cores during preprocessing.")
     ap.add_argument("--no_cache_eval", dest="cache_eval", action="store_false", help="Disable caching val/test sets after the first preprocessing pass.")
+    ap.add_argument("-v", "--verbose", action="store_true", help="Print per-run timing information.")
     ap.set_defaults(cache_eval=True)
 
     args = ap.parse_args()
+    # print(args)
 
     if args.torch_threads is not None and args.torch_threads > 0:
         torch.set_num_threads(args.torch_threads)
@@ -368,6 +161,10 @@ def main():
     lambda_ortho_grid = [float(x) for x in args.lambda_ortho_grid.split(",") if x.strip() != ""]
 
     methods_to_run = {s.strip() for s in args.methods.split(",") if s.strip()}
+    methods_needing_phi = METHODS_REQUIRING_PHI.intersection(methods_to_run)
+    need_phi = bool(methods_needing_phi)
+    if not need_phi:
+        print("Phi computation disabled for transforms (no selected methods require it).")
 
     # ------------------------------------------------------------
     # Pre-transform: cache a dense (aligned) point set once.
@@ -385,7 +182,9 @@ def main():
         num_points=args.num_points,
         knn_k=args.knn_k,
         K=args.K,
+        include_phi=need_phi,
         augment_affine=args.augment_affine,
+        phi_device=args.phi_device,
     )
 
     train_transform_aug = build_train_transform_aug(
@@ -393,14 +192,18 @@ def main():
         knn_k=args.knn_k,
         K=args.K,
         max_bias=args.max_bias_train,
+        include_phi=need_phi,
         augment_affine=args.augment_affine,
+        phi_device=args.phi_device,
     )
 
     # TEST: clean (uniform)
     test_transform_clean = build_test_transform_clean(
         num_points=args.num_points,
         knn_k=args.knn_k,
-        K=args.K
+        K=args.K,
+        include_phi=need_phi,
+        phi_device=args.phi_device,
     )
 
     # Bias transforms for stability test
@@ -408,13 +211,17 @@ def main():
         num_points=args.num_points,
         knn_k=args.knn_k,
         K=args.K,
-        bias_strength=0.0
+        bias_strength=0.0,
+        include_phi=need_phi,
+        phi_device=args.phi_device,
     )
     transform_biasS = build_stress_transform(
         num_points=args.num_points,
         knn_k=args.knn_k,
         K=args.K,
-        bias_strength=float(args.stability_bias)
+        bias_strength=float(args.stability_bias),
+        include_phi=need_phi,
+        phi_device=args.phi_device,
     )
 
     print("Loading datasets (may process once on first run) - ", end="", flush=True)
@@ -437,6 +244,7 @@ def main():
     # ------------------------------------------------------------
     # Experiment specs
     # ------------------------------------------------------------
+
     def make_model(tag: str, lam_ortho: float):
         # baselines
         if tag == "naive":
@@ -539,8 +347,19 @@ def main():
                 )
 
                 t0 = time.time()
-                metrics = train_model(model, train_loader, val_loader, test_loader, device, K=args.K, cfg=cfg, num_classes=num_classes)
+                metrics = train_model(
+                    model,
+                    train_loader,
+                    val_loader,
+                    test_loader,
+                    device,
+                    K=args.K,
+                    cfg=cfg,
+                    num_classes=num_classes,
+                    verbose=args.verbose,
+                )
                 dt = time.time() - t0
+                timing_suffix = f" (took {format_duration(dt)})" if args.verbose else ""
 
                 # stress
                 stress = eval_stress_table(
@@ -556,6 +375,8 @@ def main():
                     batch_size=args.batch_size,
                     seed=seed,
                     num_workers=args.num_workers,
+                    include_phi=need_phi,
+                    phi_device=args.phi_device,
                 )
 
                 # correlations (for all; meaningful mainly for learned models)
@@ -594,7 +415,8 @@ def main():
                 }
                 rows.append(row)
                 print(f"[{mode_name} | seed={seed} | {tag}] test_acc={metrics['test_acc']*100:.2f}% test_macc={metrics['test_macc']*100:.2f}%  "
-                      f"stress@{bias_levels[-1]}={stress[f'stress_bias_{bias_levels[-1]:.1f}']*100:.2f}%")
+                      f"stress@{bias_levels[-1]}={stress[f'stress_bias_{bias_levels[-1]:.1f}']*100:.2f}%"
+                      f"{timing_suffix}")
 
             # UMC lambda sweep
             for tag, lam in umc_variants:
@@ -609,8 +431,19 @@ def main():
                 )
 
                 t0 = time.time()
-                metrics = train_model(model, train_loader, val_loader, test_loader, device, K=args.K, cfg=cfg, num_classes=num_classes)
+                metrics = train_model(
+                    model,
+                    train_loader,
+                    val_loader,
+                    test_loader,
+                    device,
+                    K=args.K,
+                    cfg=cfg,
+                    num_classes=num_classes,
+                    verbose=args.verbose,
+                )
                 dt = time.time() - t0
+                timing_suffix = f" (took {format_duration(dt)})" if args.verbose else ""
 
                 stress = eval_stress_table(
                     model=model,
@@ -625,6 +458,8 @@ def main():
                     batch_size=args.batch_size,
                     seed=seed,
                     num_workers=args.num_workers,
+                    include_phi=need_phi,
+                    phi_device=args.phi_device,
                 )
 
                 corr_loader = DataLoader(
@@ -661,7 +496,8 @@ def main():
                 }
                 rows.append(row)
                 print(f"[{mode_name} | seed={seed} | UMC lam={lam}] test_acc={metrics['test_acc']*100:.2f}% test_macc={metrics['test_macc']*100:.2f}%  "
-                      f"stress@{bias_levels[-1]}={stress[f'stress_bias_{bias_levels[-1]:.1f}']*100:.2f}%")
+                      f"stress@{bias_levels[-1]}={stress[f'stress_bias_{bias_levels[-1]:.1f}']*100:.2f}%"
+                      f"{timing_suffix}")
 
     # ------------------------------------------------------------
     # Save + summarize

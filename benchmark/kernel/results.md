@@ -11,3 +11,12 @@ LaCore: ModelNet10 (90.4%)
 SortPool: ModelNet10 (64.4%)
 ASAP: ModelNet10 (88.4%)
 EdgePool: ModelNet10 (86.5%)
+
+**To-do list:**
+* Global-Attention
+* GMT
+* Quasi-CliquePool
+* GPN
+* MinCutPool
+* SEP
+
