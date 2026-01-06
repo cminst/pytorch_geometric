@@ -27,9 +27,15 @@ for _path in [_ROOT, _BENCH_POINTS]:
 
 _BENCH_TRANSFORMS = osp.join(_ROOT, 'benchmark', 'points', 'utils',
                              'transforms.py')
+_BENCH_CUSTOM_DATASETS = osp.join(_ROOT, 'benchmark', 'points', 'utils',
+                                  'custom_datasets.py')
 if not osp.isfile(_BENCH_TRANSFORMS):
     raise FileNotFoundError(
         f"Missing benchmark transforms at {_BENCH_TRANSFORMS}."
+    )
+if not osp.isfile(_BENCH_CUSTOM_DATASETS):
+    raise FileNotFoundError(
+        f"Missing benchmark datasets at {_BENCH_CUSTOM_DATASETS}."
     )
 
 
@@ -47,7 +53,17 @@ _bench_transforms = _load_irregular_resample()
 IrregularResample = _bench_transforms.IrregularResample
 RandomIrregularResample = _bench_transforms.RandomIrregularResample
 
-from utils.custom_datasets import ScanObjectNN
+def _load_scanobjectnn():
+    spec = importlib.util.spec_from_file_location("bench_custom_datasets",
+                                                  _BENCH_CUSTOM_DATASETS)
+    if spec is None or spec.loader is None:
+        raise ImportError("Failed to load benchmark custom datasets module.")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module.ScanObjectNN
+
+
+ScanObjectNN = _load_scanobjectnn()
 
 try:
     import pointnet2_ops  # noqa: F401
