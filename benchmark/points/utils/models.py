@@ -436,21 +436,47 @@ class UMCClassifier(BaseModel):
         in_channels: int = 3,
         use_pos: bool = True,
         use_density: bool = True,
+        use_md: Optional[bool] = None,
+        use_log_md: Optional[bool] = None,
+        use_log_deg: Optional[bool] = None,
+        use_deg: Optional[bool] = None,
         weight_hidden: Tuple[int, int] = (128, 64),
     ):
         super().__init__()
-        if use_density and scatter_mean is None:
-            raise ImportError("torch_scatter required for use_density=True.")
-
         self.K = int(K)
         self.use_pos = bool(use_pos)
         self.use_density = bool(use_density)
 
+        explicit_density_flags = any(
+            flag is not None for flag in (use_md, use_log_md, use_log_deg, use_deg)
+        )
+        if explicit_density_flags:
+            self.use_md = bool(use_md) if use_md is not None else False
+            self.use_log_md = bool(use_log_md) if use_log_md is not None else False
+            self.use_log_deg = bool(use_log_deg) if use_log_deg is not None else False
+            self.use_deg = bool(use_deg) if use_deg is not None else False
+        else:
+            self.use_md = self.use_density
+            self.use_log_md = self.use_density
+            self.use_log_deg = self.use_density
+            self.use_deg = False
+
+        if (self.use_md or self.use_log_md) and scatter_mean is None:
+            raise ImportError("torch_scatter required for mean-distance density features.")
+
         in_dim = 0
         if self.use_pos:
             in_dim += 3
-        if self.use_density:
-            in_dim += 3  # mean_dist, log_mean_dist, log_deg
+        if self.use_md:
+            in_dim += 1
+        if self.use_log_md:
+            in_dim += 1
+        if self.use_log_deg:
+            in_dim += 1
+        if self.use_deg:
+            in_dim += 1
+        if in_dim <= 0:
+            raise ValueError("UMCClassifier requires at least one weight feature (pos and/or density/degree).")
 
         self.weight_net = WeightEstimator(in_dim=in_dim, hidden=weight_hidden)
         self.core = SpectralHead(in_channels=in_channels, num_classes=num_classes, K=K)
@@ -460,14 +486,29 @@ class UMCClassifier(BaseModel):
         if self.use_pos:
             parts.append(data.pos)
 
-        if self.use_density:
+        if self.use_md or self.use_log_md or self.use_log_deg or self.use_deg:
             assert data.pos is not None, "data.pos is required"
             assert data.edge_index is not None, "data.edge_index is required"
             assert data.num_nodes is not None, "data.num_nodes is required"
-            md, log_md, log_deg = density_features(data.pos, data.edge_index, num_nodes=data.num_nodes)
-            parts.append(md.unsqueeze(1))
-            parts.append(log_md.unsqueeze(1))
-            parts.append(log_deg.unsqueeze(1))
+
+            md = log_md = log_deg = None
+            if self.use_md or self.use_log_md:
+                md, log_md, log_deg = density_features(data.pos, data.edge_index, num_nodes=data.num_nodes)
+            elif self.use_log_deg:
+                row = data.edge_index[0]
+                deg = degree(row, num_nodes=data.num_nodes, dtype=data.pos.dtype)
+                log_deg = torch.log(deg + 1.0)
+
+            if self.use_md:
+                parts.append(md.unsqueeze(1))
+            if self.use_log_md:
+                parts.append(log_md.unsqueeze(1))
+            if self.use_log_deg:
+                parts.append(log_deg.unsqueeze(1))
+            if self.use_deg:
+                row = data.edge_index[0]
+                deg = degree(row, num_nodes=data.num_nodes, dtype=data.pos.dtype)
+                parts.append(deg.unsqueeze(1))
 
         return torch.cat(parts, dim=1)
 

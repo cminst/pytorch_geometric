@@ -32,3 +32,23 @@ Evaluate stress accuracy across multiple betas using a saved checkpoint:
 ```
 python3 umc_pointwavelet_stress_eval.py --ckpt checkpoints/pointwavelet_umc_modelnet10_n1024_seed0.pt --betas 1,2,3,4 --data_root ../data/ModelNet10
 ```
+
+## UMC Ablation Grid (ModelNet10/40 + ScanObjectNN)
+
+Run the UMC-only ablation grid across datasets with selectable feature sets:
+
+```
+python benchmark/points/run_umc_ablation_grid.py \
+  --datasets ModelNet10,ModelNet40,ScanObjectNN \
+  --umc_configs full,no_coords,md_only,deg_only \
+  --degree_features log
+```
+
+UMC ablation configs:
+
+- `full`: `[x_i, md_i, log md_i, log deg_i]`
+- `no_coords`: `[md_i, log md_i, log deg_i]` (rotation-invariant)
+- `md_only`: `[md_i, log md_i]`
+- `deg_only`: `[log deg_i]` (or `[deg_i, log deg_i]` with `--degree_features both`)
+
+You can limit runs to a single dataset with `--dataset ModelNet10` and choose subsets of configs with `--umc_configs`.
