@@ -55,6 +55,7 @@ class WaveletFormerConfig:
     learnable: bool = False
     beta: float = 0.05  # L1 weight for q_eps in learnable basis
     eps: float = 1e-8
+    chunk_size: Optional[int] = None
 
     # Transformer
     depth: int = 2
@@ -62,6 +63,7 @@ class WaveletFormerConfig:
     mlp_ratio: float = 4.0
     dropout: float = 0.0
     attn_dropout: float = 0.0
+    force_math_attn: bool = False
 
     # Universal Measure Correction (UMC) style quadrature weights
     # If enabled, WaveletFormer will compute coefficients as Psi_s (W x)
@@ -134,6 +136,7 @@ class WaveletFormer(nn.Module):
                 mlp_ratio=cfg.mlp_ratio,
                 dropout=cfg.dropout,
                 attn_dropout=cfg.attn_dropout,
+                force_math_attn=cfg.force_math_attn,
             )
         )
 
@@ -165,7 +168,7 @@ class WaveletFormer(nn.Module):
         lambdas, U = torch.linalg.eigh(L)  # lambdas: (P,n), U: (P,n,n)
         return U, lambdas
 
-    def forward(self, x: torch.Tensor, xyz: Optional[torch.Tensor] = None) -> torch.Tensor:
+    def _forward_chunk(self, x: torch.Tensor, xyz: Optional[torch.Tensor]) -> torch.Tensor:
         if x.dim() != 3:
             raise ValueError(f"x must be (P,n,C), got {x.shape}")
         P, n, C = x.shape
@@ -271,3 +274,19 @@ class WaveletFormer(nn.Module):
         if (w is not None) and self.cfg.umc_use_inverse:
             out = out / torch.clamp(w.unsqueeze(-1), min=self.cfg.umc_min_weight)
         return out
+
+    def forward(self, x: torch.Tensor, xyz: Optional[torch.Tensor] = None) -> torch.Tensor:
+        if x.dim() != 3:
+            raise ValueError(f"x must be (P,n,C), got {x.shape}")
+        P = x.shape[0]
+        chunk = self.cfg.chunk_size
+        if chunk is None or chunk <= 0 or P <= chunk:
+            return self._forward_chunk(x, xyz)
+
+        outs: List[torch.Tensor] = []
+        for start in range(0, P, int(chunk)):
+            end = min(start + int(chunk), P)
+            x_chunk = x[start:end]
+            xyz_chunk = xyz[start:end] if xyz is not None else None
+            outs.append(self._forward_chunk(x_chunk, xyz_chunk))
+        return torch.cat(outs, dim=0)

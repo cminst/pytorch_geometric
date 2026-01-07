@@ -1,4 +1,4 @@
-"""Train/evaluate PointWavelet baselines on ModelNet10/40.
+"""Train/evaluate PointWavelet baselines on ModelNet10/40 or ScanObjectNN.
 
 This script intentionally runs only two methods:
   1) PointWavelet (default: PointWavelet-L, i.e. learnable spectral basis)
@@ -28,13 +28,34 @@ from typing import Dict, List, Optional, Tuple
 import numpy as np
 import torch
 import torch.nn.functional as F
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, Dataset
 
 from torch_geometric.datasets import ModelNet
-from torch_geometric.transforms import Compose, NormalizeScale, SamplePoints
+from torch_geometric.transforms import (
+    Compose,
+    FixedPoints,
+    NormalizeScale,
+    SamplePoints,
+)
 
 from pointwavelet import PointWaveletClassifier, PointWaveletClsConfig
-from utils.transforms import IrregularResample, PointJitter, PointMLPAffine
+from utils.custom_datasets import ScanObjectNN
+from utils.transforms import (
+    IrregularResample,
+    PointJitter,
+    PointMLPAffine,
+    RandomShufflePoints,
+    TakeFirstPoints,
+)
+
+DATASET_INFO = {
+    "ModelNet10": {"num_classes": 10},
+    "ModelNet40": {"num_classes": 40},
+    "ScanObjectNN": {"num_classes": 15},
+}
+
+SCAN_POINTMLP_VARIANT = "PB_T50_RS"
+SCAN_POINTMLP_SPLIT = "main_split"
 
 
 def _device() -> torch.device:
@@ -297,34 +318,101 @@ def collate_points(items) -> Tuple[torch.Tensor, torch.Tensor]:
     return xyz, y
 
 
-def build_datasets(root: str, num_points: int, force_reload: bool, modelnet: str) -> Tuple[ModelNet, ModelNet]:
-    train_transform = Compose(
-        [
-            SamplePoints(num_points),
-            NormalizeScale(),
-            PointMLPAffine(),
-            PointJitter(),
-        ]
-    )
-    test_transform = Compose(
-        [
-            SamplePoints(num_points),
-            NormalizeScale(),
-        ]
-    )
-    train_ds = ModelNet(
+def _resolve_dataset_root(data_root: str, dataset_name: str) -> str:
+    base = os.path.basename(os.path.normpath(data_root))
+    if base == dataset_name:
+        return data_root
+    return os.path.join(data_root, dataset_name)
+
+
+def _build_sampling_transform(dataset_name: str, num_points: int):
+    if dataset_name in {"ModelNet10", "ModelNet40"}:
+        return SamplePoints(num_points)
+    if dataset_name == "ScanObjectNN":
+        return TakeFirstPoints(num_points)
+    return FixedPoints(num_points, replace=False, allow_duplicates=True)
+
+
+def _load_dataset(
+    dataset_name: str,
+    root: str,
+    train: bool,
+    transform,
+    force_reload: bool,
+):
+    if dataset_name == "ModelNet10":
+        return ModelNet(
+            root=root,
+            name="10",
+            train=train,
+            pre_transform=None,
+            transform=transform,
+            force_reload=force_reload,
+        )
+    if dataset_name == "ModelNet40":
+        return ModelNet(
+            root=root,
+            name="40",
+            train=train,
+            pre_transform=None,
+            transform=transform,
+            force_reload=force_reload,
+        )
+    if dataset_name == "ScanObjectNN":
+        return ScanObjectNN(
+            root=root,
+            train=train,
+            pre_transform=None,
+            transform=transform,
+            force_reload=force_reload,
+            variant=SCAN_POINTMLP_VARIANT,
+            split_dir=SCAN_POINTMLP_SPLIT,
+        )
+    raise ValueError(f"Unknown dataset_name: {dataset_name}. Supported: {list(DATASET_INFO.keys())}")
+
+
+def build_datasets(
+    root: str,
+    num_points: int,
+    force_reload: bool,
+    dataset_name: str,
+) -> Tuple[Dataset, Dataset]:
+    sampling = _build_sampling_transform(dataset_name, num_points)
+    if dataset_name == "ScanObjectNN":
+        train_transform = Compose(
+            [
+                sampling,
+                PointMLPAffine(),
+                RandomShufflePoints(),
+            ]
+        )
+        test_transform = Compose([sampling])
+    else:
+        train_transform = Compose(
+            [
+                sampling,
+                NormalizeScale(),
+                PointMLPAffine(),
+                PointJitter(),
+            ]
+        )
+        test_transform = Compose(
+            [
+                sampling,
+                NormalizeScale(),
+            ]
+        )
+    train_ds = _load_dataset(
+        dataset_name=dataset_name,
         root=root,
-        name=modelnet,
         train=True,
-        pre_transform=None,
         transform=train_transform,
         force_reload=force_reload,
     )
-    test_ds = ModelNet(
+    test_ds = _load_dataset(
+        dataset_name=dataset_name,
         root=root,
-        name=modelnet,
         train=False,
-        pre_transform=None,
         transform=test_transform,
         force_reload=force_reload,
     )
@@ -335,24 +423,24 @@ def build_stress_loader(
     root: str,
     num_points: int,
     dense_points: int,
-    modelnet: str,
+    dataset_name: str,
     bias_strength: float,
     batch_size: int,
     force_reload: bool,
     device: torch.device,
 ) -> DataLoader:
+    sampling = _build_sampling_transform(dataset_name, dense_points)
     stress_transform = Compose(
         [
-            SamplePoints(dense_points),
+            sampling,
             NormalizeScale(),
             IrregularResample(num_points=num_points, bias_strength=bias_strength),
         ]
     )
-    stress_ds = ModelNet(
+    stress_ds = _load_dataset(
+        dataset_name=dataset_name,
         root=root,
-        name=modelnet,
         train=False,
-        pre_transform=None,
         transform=stress_transform,
         force_reload=force_reload,
     )
@@ -387,6 +475,8 @@ def build_model(
         wf_depth=2,
         wf_heads=4,
         wf_sigma_mode="mean",
+        wf_chunk_size=None,
+        wf_force_math_attn=False,
         wf_use_umc=use_umc,
         wf_umc_hidden=umc_hidden,
         wf_umc_knn=umc_knn,
@@ -406,6 +496,10 @@ def train_one(
     weight_decay: float,
     lr_step: int,
     lr_gamma: float,
+    optim_name: str,
+    scheduler_name: str,
+    lr_min: Optional[float],
+    sgd_momentum: float,
     amp: bool,
     num_classes: int,
     wandb_run: Optional[object] = None,
@@ -418,8 +512,21 @@ def train_one(
 ) -> dict:
     model = model.to(device)
 
-    opt = torch.optim.Adam(model.parameters(), lr=lr, weight_decay=weight_decay)
-    scheduler = torch.optim.lr_scheduler.StepLR(opt, step_size=max(lr_step, 1), gamma=lr_gamma)
+    if optim_name == "sgd":
+        opt = torch.optim.SGD(
+            model.parameters(),
+            lr=lr,
+            momentum=sgd_momentum,
+            weight_decay=weight_decay,
+        )
+    else:
+        opt = torch.optim.Adam(model.parameters(), lr=lr, weight_decay=weight_decay)
+
+    if scheduler_name == "cosine":
+        eta_min = lr_min if lr_min is not None else lr / 100.0
+        scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(opt, T_max=epochs, eta_min=eta_min)
+    else:
+        scheduler = torch.optim.lr_scheduler.StepLR(opt, step_size=max(lr_step, 1), gamma=lr_gamma)
 
     use_amp = bool(amp and device.type == "cuda")
     scaler = torch.amp.GradScaler("cuda", enabled=use_amp)
@@ -508,13 +615,27 @@ def train_one(
 
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser()
-    p.add_argument("--data_root", type=str, default="data", help="Root directory for torch_geometric ModelNet (default: data)")
     p.add_argument(
-        "--modelnet",
+        "--data_root",
         type=str,
-        default="40",
-        choices=["10", "40"],
-        help="Which dataset split to use: ModelNet10 or ModelNet40. (default: 40)",
+        default="data",
+        help="Root directory for datasets (default: data)",
+    )
+    p.add_argument(
+        "--dataset_name",
+        type=str,
+        default="ModelNet40",
+        choices=list(DATASET_INFO.keys()),
+        help="Dataset name (default: ModelNet40)",
+    )
+    p.add_argument(
+        "--scan_pointmlp_recipe",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help=(
+            "Match PointMLP training recipe (ScanObjectNN only): SGD+cosine, batch=32, lr=0.01, epochs=200. "
+            "(default: False)"
+        ),
     )
     p.add_argument("--force_reload", action="store_true", help="Force reprocessing the dataset")
     p.add_argument("--num_points", type=int, default=1024, help="Number of points to sample (default: 1024)")
@@ -523,8 +644,12 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--epochs", type=int, default=200, help="Number of training epochs (default: 200)")
     p.add_argument("--lr", type=float, default=1e-3, help="Learning rate (default: 1e-3)")
     p.add_argument("--weight_decay", type=float, default=1e-4, help="Weight decay (default: 1e-4)")
+    p.add_argument("--optimizer", type=str, default="adam", choices=["adam", "sgd"], help="Optimizer (default: adam)")
+    p.add_argument("--scheduler", type=str, default="step", choices=["step", "cosine"], help="LR scheduler (default: step)")
     p.add_argument("--lr_step", type=int, default=20, help="Learning rate decay step (default: 20)")
     p.add_argument("--lr_gamma", type=float, default=0.7, help="Learning rate decay gamma (default: 0.7)")
+    p.add_argument("--lr_min", type=float, default=None, help="Cosine min LR (default: lr/100)")
+    p.add_argument("--sgd_momentum", type=float, default=0.9, help="SGD momentum (default: 0.9)")
     p.add_argument("--amp", action="store_true", help="Use CUDA AMP (fp16) if available")
     p.add_argument("--seeds", type=str, default="0", help="Comma-separated seeds, e.g. '0,1,2,3' (default: 0)")
     p.add_argument(
@@ -550,7 +675,6 @@ def parse_args() -> argparse.Namespace:
         default=True,
         help="Use PointWavelet-L (learnable spectral basis). (default: True)",
     )
-
     # UMC settings
     p.add_argument("--umc_hidden", type=str, default="128,32", help="Hidden widths for UMC MLP (default: 128,32)")
     p.add_argument("--umc_knn", type=int, default=20, help="k for UMC k-NN graph (default: 20)")
@@ -600,6 +724,18 @@ def _resolve_methods(choice: str) -> List[Tuple[str, bool, str]]:
 
 def main() -> None:
     args = parse_args()
+    if args.dataset_name == "ScanObjectNN":
+        if args.scan_pointmlp_recipe:
+            # PointMLP training recipe
+            args.batch_size = 32
+            args.lr = 0.01
+            args.epochs = 200
+            args.weight_decay = 1e-4
+            args.optimizer = "sgd"
+            args.scheduler = "cosine"
+            if args.lr_min is None:
+                args.lr_min = args.lr / 100.0
+
     device = _device()
     print(f"Device: {device}", flush=True)
 
@@ -607,11 +743,12 @@ def main() -> None:
     seeds = _parse_seeds(args.seeds)
     methods = _resolve_methods(args.methods)
 
+    dataset_root = _resolve_dataset_root(args.data_root, args.dataset_name)
     train_ds, test_ds = build_datasets(
-        args.data_root,
+        dataset_root,
         args.num_points,
         force_reload=bool(args.force_reload),
-        modelnet=str(args.modelnet),
+        dataset_name=args.dataset_name,
     )
 
     train_loader = DataLoader(
@@ -636,17 +773,17 @@ def main() -> None:
     stress_loader = None
     if args.stress_interval > 0:
         stress_loader = build_stress_loader(
-            root=args.data_root,
+            root=dataset_root,
             num_points=args.num_points,
             dense_points=args.stress_dense_points,
-            modelnet=str(args.modelnet),
+            dataset_name=args.dataset_name,
             bias_strength=args.stress_beta,
             batch_size=args.batch_size,
             force_reload=bool(args.force_reload),
             device=device,
         )
 
-    num_classes = 10 if str(args.modelnet) == "10" else 40
+    num_classes = DATASET_INFO[args.dataset_name]["num_classes"]
     results: List[dict] = []
     for seed in seeds:
         set_seed(seed)
@@ -674,6 +811,10 @@ def main() -> None:
                 weight_decay=args.weight_decay,
                 lr_step=args.lr_step,
                 lr_gamma=args.lr_gamma,
+                optim_name=str(args.optimizer),
+                scheduler_name=str(args.scheduler),
+                lr_min=args.lr_min,
+                sgd_momentum=float(args.sgd_momentum),
                 amp=bool(args.amp),
                 num_classes=num_classes,
                 wandb_run=run,
@@ -697,12 +838,12 @@ def main() -> None:
             )
             if args.save_ckpt:
                 os.makedirs(args.ckpt_dir, exist_ok=True)
-                ckpt_name = f"{method_key}_modelnet{args.modelnet}_n{args.num_points}_seed{seed}.pt"
+                ckpt_name = f"{method_key}_{args.dataset_name}_n{args.num_points}_seed{seed}.pt"
                 ckpt_path = os.path.join(args.ckpt_dir, ckpt_name)
                 meta = {
                     "seed": seed,
                     "method": method_key,
-                    "modelnet": str(args.modelnet),
+                    "dataset_name": args.dataset_name,
                     "num_points": int(args.num_points),
                     "num_classes": int(num_classes),
                     "wf_learnable": bool(args.wf_learnable),

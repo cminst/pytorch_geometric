@@ -72,6 +72,48 @@ class PointJitter(BaseTransform):
         return data
 
 
+class TakeFirstPoints(BaseTransform):
+    """Deterministically take the first num_points (PointMLP ScanObjectNN style)."""
+    def __init__(self, num_points: int):
+        self.num_points = int(num_points)
+
+    def forward(self, data: Data) -> Data:
+        pos = data.pos
+        N = int(pos.size(0))
+        if N <= 0:
+            return data
+        if N >= self.num_points:
+            idx = torch.arange(self.num_points, device=pos.device)
+        else:
+            idx = torch.randint(0, N, (self.num_points,), device=pos.device)
+        data.pos = pos[idx]
+        if hasattr(data, "x") and data.x is not None and data.x.size(0) == N:
+            data.x = data.x[idx]
+        # wipe derived fields if present
+        for key in ["edge_index", "edge_attr", "phi", "phi_evals", "deg", "batch"]:
+            if hasattr(data, key):
+                delattr(data, key)
+        data.num_nodes = self.num_points
+        return data
+
+
+class RandomShufflePoints(BaseTransform):
+    """Randomly permute point order (PointMLP ScanObjectNN style)."""
+    def forward(self, data: Data) -> Data:
+        pos = data.pos
+        N = int(pos.size(0))
+        if N <= 1:
+            return data
+        idx = torch.randperm(N, device=pos.device)
+        data.pos = pos[idx]
+        if hasattr(data, "x") and data.x is not None and data.x.size(0) == N:
+            data.x = data.x[idx]
+        for key in ["edge_index", "edge_attr", "phi", "phi_evals", "deg", "batch"]:
+            if hasattr(data, key):
+                delattr(data, key)
+        return data
+
+
 class IrregularResample(BaseTransform):
     """Resample points with optional exponential bias along a random focus direction.
 
