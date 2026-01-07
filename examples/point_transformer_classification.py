@@ -28,7 +28,8 @@ if _BENCH_POINTS not in sys.path:
     sys.path.insert(0, _BENCH_POINTS)
 if _ROOT not in sys.path:
     sys.path.insert(0, _ROOT)
-from utils.transforms import IrregularResample
+from utils.custom_datasets import ScanObjectNN
+from utils.transforms import IrregularResample, RandomIrregularResample
 
 if not WITH_TORCH_CLUSTER:
     quit("This example requires 'torch-cluster'")
@@ -39,7 +40,7 @@ parser.add_argument(
     '--dataset',
     type=str,
     default='ModelNet10',
-    choices=['ModelNet10', 'ModelNet40'],
+    choices=['ModelNet10', 'ModelNet40', 'ScanObjectNN'],
     help='Dataset name.',
 )
 parser.add_argument(
@@ -51,12 +52,23 @@ parser.add_argument(
 parser.add_argument('--batch_size', type=int, default=32)
 parser.add_argument('--num_workers', type=int, default=6)
 parser.add_argument('--epochs', type=int, default=200)
+parser.add_argument(
+    '--train_mode',
+    type=str,
+    default='clean',
+    choices=['clean', 'aug'],
+    help='Training transform: clean or aug (IrregularResample beta~U[0,4]).',
+)
 
 NUM_POINTS = 1024
+TRAIN_AUG_DENSE_POINTS = 2048
+TRAIN_AUG_MAX_BIAS = 4.0
 STRESS_DENSE_POINTS = 2048
 STRESS_BETAS = [0, 1, 2, 3, 4, 5]
 STRESS_SEEDS = list(range(1, 11))
 RUN_STRESS_EVAL = True
+SCAN_VARIANT = 'PB_T50_RS'
+SCAN_SPLIT_DIR = 'main_split'
 
 def _seed_all(seed: int) -> None:
     random.seed(seed)
@@ -79,6 +91,40 @@ def _preserve_rng_state(fn):
         torch.random.set_rng_state(state["torch"])
         if state["cuda"] is not None:
             torch.cuda.set_rng_state_all(state["cuda"])
+
+def _modelnet_variant(name: str) -> str:
+    return '10' if name == 'ModelNet10' else '40'
+
+def _build_transforms(dataset_name: str, train_mode: str):
+    if dataset_name in {'ModelNet10', 'ModelNet40'}:
+        if train_mode == 'aug':
+            train_transform = T.Compose([
+                T.SamplePoints(TRAIN_AUG_DENSE_POINTS),
+                RandomIrregularResample(
+                    num_points=NUM_POINTS,
+                    max_bias=TRAIN_AUG_MAX_BIAS,
+                ),
+            ])
+        else:
+            train_transform = T.Compose([T.SamplePoints(NUM_POINTS)])
+        test_transform = T.Compose([T.SamplePoints(NUM_POINTS)])
+        return train_transform, test_transform
+
+    if train_mode == 'aug':
+        train_transform = T.Compose([
+            RandomIrregularResample(
+                num_points=NUM_POINTS,
+                max_bias=TRAIN_AUG_MAX_BIAS,
+            ),
+        ])
+    else:
+        train_transform = T.Compose([
+            IrregularResample(num_points=NUM_POINTS, bias_strength=0.0),
+        ])
+    test_transform = T.Compose([
+        IrregularResample(num_points=NUM_POINTS, bias_strength=0.0),
+    ])
+    return train_transform, test_transform
 
 
 class TransformerBlock(torch.nn.Module):
@@ -219,20 +265,38 @@ def test(loader):
         correct += pred.eq(data.y).sum().item()
     return correct / len(loader.dataset)
 
-def _build_stress_loader(root, variant, beta, batch_size):
-    stress_transform = T.Compose([
-        T.SamplePoints(STRESS_DENSE_POINTS),
-        IrregularResample(num_points=NUM_POINTS, bias_strength=float(beta)),
-    ])
-    stress_dataset = ModelNet(root, variant, False, stress_transform,
-                              pre_transform=T.NormalizeScale())
+def _build_stress_loader(root, dataset_name, beta, batch_size):
+    if dataset_name in {'ModelNet10', 'ModelNet40'}:
+        stress_transform = T.Compose([
+            T.SamplePoints(STRESS_DENSE_POINTS),
+            IrregularResample(num_points=NUM_POINTS, bias_strength=float(beta)),
+        ])
+        stress_dataset = ModelNet(
+            root,
+            _modelnet_variant(dataset_name),
+            False,
+            stress_transform,
+            pre_transform=T.NormalizeScale(),
+        )
+    else:
+        stress_transform = T.Compose([
+            IrregularResample(num_points=NUM_POINTS, bias_strength=float(beta)),
+        ])
+        stress_dataset = ScanObjectNN(
+            root=root,
+            train=False,
+            transform=stress_transform,
+            pre_transform=T.NormalizeScale(),
+            variant=SCAN_VARIANT,
+            split_dir=SCAN_SPLIT_DIR,
+        )
     return DataLoader(stress_dataset, batch_size=batch_size, shuffle=False,
                       num_workers=0)
 
-def eval_stress_sweep(root, variant, batch_size):
+def eval_stress_sweep(root, dataset_name, batch_size):
     results = {}
     for beta in STRESS_BETAS:
-        loader = _build_stress_loader(root, variant, beta, batch_size)
+        loader = _build_stress_loader(root, dataset_name, beta, batch_size)
         accs = []
         for seed in STRESS_SEEDS:
             def _run():
@@ -255,11 +319,44 @@ if __name__ == '__main__':
     num_workers = args.num_workers
     batch_size = args.batch_size
     root = osp.join(args.dataset_dir, args.dataset)
-    variant = '10' if args.dataset == 'ModelNet10' else '40'
-
-    pre_transform, transform = T.NormalizeScale(), T.SamplePoints(NUM_POINTS)
-    train_dataset = ModelNet(root, variant, True, transform, pre_transform)
-    test_dataset = ModelNet(root, variant, False, transform, pre_transform)
+    pre_transform = T.NormalizeScale()
+    train_transform, test_transform = _build_transforms(
+        args.dataset,
+        args.train_mode,
+    )
+    if args.dataset in {'ModelNet10', 'ModelNet40'}:
+        variant = _modelnet_variant(args.dataset)
+        train_dataset = ModelNet(
+            root,
+            variant,
+            True,
+            train_transform,
+            pre_transform,
+        )
+        test_dataset = ModelNet(
+            root,
+            variant,
+            False,
+            test_transform,
+            pre_transform,
+        )
+    else:
+        train_dataset = ScanObjectNN(
+            root=root,
+            train=True,
+            transform=train_transform,
+            pre_transform=pre_transform,
+            variant=SCAN_VARIANT,
+            split_dir=SCAN_SPLIT_DIR,
+        )
+        test_dataset = ScanObjectNN(
+            root=root,
+            train=False,
+            transform=test_transform,
+            pre_transform=pre_transform,
+            variant=SCAN_VARIANT,
+            split_dir=SCAN_SPLIT_DIR,
+        )
     train_loader = DataLoader(train_dataset, batch_size=batch_size,
                               shuffle=True, num_workers=num_workers)
     test_loader = DataLoader(test_dataset, batch_size=batch_size,
@@ -279,4 +376,4 @@ if __name__ == '__main__':
         scheduler.step()
 
     if RUN_STRESS_EVAL:
-        eval_stress_sweep(root, variant, batch_size=batch_size)
+        eval_stress_sweep(root, args.dataset, batch_size=batch_size)

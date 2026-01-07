@@ -14,18 +14,28 @@ from torch_geometric.loader import DataLoader
 from torch_geometric.utils import to_dense_batch
 
 _ROOT = osp.join(osp.dirname(osp.realpath(__file__)), '..')
+_BENCH_POINTS = osp.join(_ROOT, 'benchmark', 'points')
 _POINTMLP_ROOT = osp.join(_ROOT, 'pointMLP-pytorch')
 _POINTMLP_MODELS = osp.join(_POINTMLP_ROOT, 'classification_ModelNet40')
 _POINTNET2_OPS = osp.join(_POINTMLP_ROOT, 'pointnet2_ops_lib')
 for _path in [_POINTNET2_OPS, _POINTMLP_MODELS]:
     if _path not in sys.path:
         sys.path.insert(0, _path)
+for _path in [_ROOT, _BENCH_POINTS]:
+    if _path not in sys.path:
+        sys.path.insert(0, _path)
 
 _BENCH_TRANSFORMS = osp.join(_ROOT, 'benchmark', 'points', 'utils',
                              'transforms.py')
+_BENCH_CUSTOM_DATASETS = osp.join(_ROOT, 'benchmark', 'points', 'utils',
+                                  'custom_datasets.py')
 if not osp.isfile(_BENCH_TRANSFORMS):
     raise FileNotFoundError(
         f"Missing benchmark transforms at {_BENCH_TRANSFORMS}."
+    )
+if not osp.isfile(_BENCH_CUSTOM_DATASETS):
+    raise FileNotFoundError(
+        f"Missing benchmark datasets at {_BENCH_CUSTOM_DATASETS}."
     )
 
 
@@ -36,10 +46,24 @@ def _load_irregular_resample():
         raise ImportError("Failed to load benchmark transforms module.")
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
-    return module.IrregularResample
+    return module
 
 
-IrregularResample = _load_irregular_resample()
+_bench_transforms = _load_irregular_resample()
+IrregularResample = _bench_transforms.IrregularResample
+RandomIrregularResample = _bench_transforms.RandomIrregularResample
+
+def _load_scanobjectnn():
+    spec = importlib.util.spec_from_file_location("bench_custom_datasets",
+                                                  _BENCH_CUSTOM_DATASETS)
+    if spec is None or spec.loader is None:
+        raise ImportError("Failed to load benchmark custom datasets module.")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module.ScanObjectNN
+
+
+ScanObjectNN = _load_scanobjectnn()
 
 try:
     import pointnet2_ops  # noqa: F401
@@ -62,7 +86,7 @@ parser.add_argument(
     '--dataset',
     type=str,
     default='ModelNet10',
-    choices=['ModelNet10', 'ModelNet40'],
+    choices=['ModelNet10', 'ModelNet40', 'ScanObjectNN'],
     help='Dataset name.',
 )
 parser.add_argument(
@@ -74,11 +98,22 @@ parser.add_argument(
 parser.add_argument('--batch_size', type=int, default=32)
 parser.add_argument('--num_workers', type=int, default=6)
 parser.add_argument('--epochs', type=int, default=200)
+parser.add_argument(
+    '--train_mode',
+    type=str,
+    default='clean',
+    choices=['clean', 'aug'],
+    help='Training transform: clean or aug (IrregularResample beta~U[0,4]).',
+)
 NUM_POINTS = 1024
+TRAIN_AUG_DENSE_POINTS = 2048
+TRAIN_AUG_MAX_BIAS = 4.0
 STRESS_DENSE_POINTS = 2048
 STRESS_BETAS = [0, 1, 2, 3, 4, 5]
 STRESS_SEEDS = list(range(1, 11))
 RUN_STRESS_EVAL = True
+SCAN_VARIANT = 'PB_T50_RS'
+SCAN_SPLIT_DIR = 'main_split'
 
 
 def _seed_all(seed: int) -> None:
@@ -152,21 +187,88 @@ def test(loader):
     return correct / len(loader.dataset)
 
 
-def _build_stress_loader(root, variant, beta, batch_size):
-    stress_transform = T.Compose([
-        T.SamplePoints(STRESS_DENSE_POINTS),
-        IrregularResample(num_points=NUM_POINTS, bias_strength=float(beta)),
+def _modelnet_variant(name: str) -> str:
+    return '10' if name == 'ModelNet10' else '40'
+
+
+def _load_dataset(dataset_name, root, train, transform, pre_transform):
+    if dataset_name in {'ModelNet10', 'ModelNet40'}:
+        return ModelNet(
+            root,
+            _modelnet_variant(dataset_name),
+            train,
+            transform,
+            pre_transform,
+        )
+    if dataset_name == 'ScanObjectNN':
+        return ScanObjectNN(
+            root=root,
+            train=train,
+            transform=transform,
+            pre_transform=pre_transform,
+            variant=SCAN_VARIANT,
+            split_dir=SCAN_SPLIT_DIR,
+        )
+    raise ValueError(f'Unknown dataset: {dataset_name}')
+
+
+def _build_transforms(dataset_name: str, train_mode: str):
+    if dataset_name in {'ModelNet10', 'ModelNet40'}:
+        if train_mode == 'aug':
+            train_transform = T.Compose([
+                T.SamplePoints(TRAIN_AUG_DENSE_POINTS),
+                RandomIrregularResample(
+                    num_points=NUM_POINTS,
+                    max_bias=TRAIN_AUG_MAX_BIAS,
+                ),
+            ])
+        else:
+            train_transform = T.Compose([T.SamplePoints(NUM_POINTS)])
+        test_transform = T.Compose([T.SamplePoints(NUM_POINTS)])
+        return train_transform, test_transform
+
+    if train_mode == 'aug':
+        train_transform = T.Compose([
+            RandomIrregularResample(
+                num_points=NUM_POINTS,
+                max_bias=TRAIN_AUG_MAX_BIAS,
+            ),
+        ])
+    else:
+        train_transform = T.Compose([
+            IrregularResample(num_points=NUM_POINTS, bias_strength=0.0),
+        ])
+    test_transform = T.Compose([
+        IrregularResample(num_points=NUM_POINTS, bias_strength=0.0),
     ])
-    stress_dataset = ModelNet(root, variant, False, stress_transform,
-                              pre_transform=T.NormalizeScale())
+    return train_transform, test_transform
+
+
+def _build_stress_loader(root, dataset_name, beta, batch_size):
+    if dataset_name in {'ModelNet10', 'ModelNet40'}:
+        stress_transform = T.Compose([
+            T.SamplePoints(STRESS_DENSE_POINTS),
+            IrregularResample(num_points=NUM_POINTS, bias_strength=float(beta)),
+        ])
+    else:
+        stress_transform = T.Compose([
+            IrregularResample(num_points=NUM_POINTS, bias_strength=float(beta)),
+        ])
+    stress_dataset = _load_dataset(
+        dataset_name,
+        root,
+        False,
+        stress_transform,
+        pre_transform=T.NormalizeScale(),
+    )
     return DataLoader(stress_dataset, batch_size=batch_size, shuffle=False,
                       num_workers=0)
 
 
-def eval_stress_sweep(root, variant, batch_size):
+def eval_stress_sweep(root, dataset_name, batch_size):
     results = {}
     for beta in STRESS_BETAS:
-        loader = _build_stress_loader(root, variant, beta, batch_size)
+        loader = _build_stress_loader(root, dataset_name, beta, batch_size)
         accs = []
         for seed in STRESS_SEEDS:
             def _run():
@@ -190,11 +292,25 @@ if __name__ == '__main__':
     batch_size = args.batch_size
     root = osp.join(args.dataset_dir, args.dataset)
 
-    variant = '10' if args.dataset == 'ModelNet10' else '40'
-
-    pre_transform, transform = T.NormalizeScale(), T.SamplePoints(NUM_POINTS)
-    train_dataset = ModelNet(root, variant, True, transform, pre_transform)
-    test_dataset = ModelNet(root, variant, False, transform, pre_transform)
+    pre_transform = T.NormalizeScale()
+    train_transform, test_transform = _build_transforms(
+        args.dataset,
+        args.train_mode,
+    )
+    train_dataset = _load_dataset(
+        args.dataset,
+        root,
+        True,
+        train_transform,
+        pre_transform,
+    )
+    test_dataset = _load_dataset(
+        args.dataset,
+        root,
+        False,
+        test_transform,
+        pre_transform,
+    )
     train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True,
                               num_workers=num_workers)
     test_loader = DataLoader(test_dataset, batch_size=batch_size,
@@ -210,4 +326,4 @@ if __name__ == '__main__':
         print(f'Epoch: {epoch:03d}, Test: {test_acc:.4f}')
 
     if RUN_STRESS_EVAL:
-        eval_stress_sweep(root, variant, batch_size=batch_size)
+        eval_stress_sweep(root, args.dataset, batch_size=batch_size)

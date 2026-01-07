@@ -3,18 +3,18 @@
 from __future__ import annotations
 
 import argparse
-import copy
-import os
 from typing import List, Optional
 
 import numpy as np
 import torch
-from torch_geometric.datasets import ModelNet
-from torch_geometric.transforms import Compose, NormalizeScale, SamplePoints
 
 from pointwavelet import PointWaveletClassifier, PointWaveletClsConfig
-from umc_pointwavelet import _device, _eval_stress_accuracy, _preserve_rng_state, _seed_rng, build_stress_loader
-from utils.transforms import IrregularResample
+from umc_pointwavelet import (
+    _device,
+    _eval_stress_accuracy,
+    _resolve_dataset_root,
+    build_stress_loader,
+)
 
 
 def _parse_betas(s: str) -> List[float]:
@@ -38,6 +38,13 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--betas", type=str, default="2.0", help="Comma-separated bias strengths (default: 2.0)")
     p.add_argument("--batch_size", type=int, default=16, help="Batch size for stress DataLoader (default: 16)")
     p.add_argument("--stress_dense_points", type=int, default=2048, help="Dense points before stress resample (default: 2048)")
+    p.add_argument(
+        "--dataset_name",
+        type=str,
+        default=None,
+        choices=["ModelNet10", "ModelNet40", "ScanObjectNN"],
+        help="Override dataset name. Defaults to ckpt meta if available.",
+    )
     p.add_argument("--modelnet", type=str, default=None, help="Override ModelNet split (10 or 40). Defaults to ckpt meta.")
     p.add_argument("--num_points", type=int, default=None, help="Override num_points. Defaults to ckpt meta.")
     p.add_argument(
@@ -60,10 +67,6 @@ def _load_checkpoint(path: str, device: torch.device) -> tuple[PointWaveletClass
     return model, ckpt.get("meta", {})
 
 
-def _beta_tag(beta: float) -> str:
-    return f"{beta:.2f}".replace(".", "p")
-
-
 def main() -> None:
     args = parse_args()
     device = _device()
@@ -71,7 +74,13 @@ def main() -> None:
     model, meta = _load_checkpoint(args.ckpt, device=device)
     model = model.to(device)
 
-    modelnet = args.modelnet if args.modelnet is not None else str(meta.get("modelnet", "40"))
+    if args.dataset_name is not None:
+        dataset_name = args.dataset_name
+    else:
+        dataset_name = str(meta.get("dataset_name", "") or "")
+        if not dataset_name:
+            modelnet = args.modelnet if args.modelnet is not None else str(meta.get("modelnet", "40"))
+            dataset_name = "ModelNet10" if str(modelnet) == "10" else "ModelNet40"
     num_points = args.num_points if args.num_points is not None else int(meta.get("num_points", 1024))
     seeds = _parse_seeds(args.seeds)
     if not seeds:
@@ -80,16 +89,18 @@ def main() -> None:
     betas = _parse_betas(args.betas)
     print(f"Loaded {args.ckpt}", flush=True)
     print(
-        f"ModelNet{modelnet} | num_points={num_points} | seeds={','.join(str(s) for s in seeds)}",
+        f"{dataset_name} | num_points={num_points} | seeds={','.join(str(s) for s in seeds)}",
         flush=True,
     )
 
+    dataset_root = _resolve_dataset_root(args.data_root, dataset_name)
+
     for beta in betas:
         stress_loader = build_stress_loader(
-            root=args.data_root,
+            root=dataset_root,
             num_points=num_points,
             dense_points=args.stress_dense_points,
-            modelnet=str(modelnet),
+            dataset_name=dataset_name,
             bias_strength=float(beta),
             batch_size=args.batch_size,
             force_reload=bool(args.force_reload),
