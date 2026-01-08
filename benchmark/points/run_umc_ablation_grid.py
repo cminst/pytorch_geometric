@@ -17,7 +17,7 @@ from utils.datasets import (
     load_dataset,
     make_loaders,
 )
-from utils.models import UMCClassifier, format_duration, seed_everything
+from utils.models import UMCClassifier, UMCPointEncoderClassifier, format_duration, seed_everything
 from utils.training import (
     TrainConfig,
     eval_accuracy,
@@ -33,6 +33,7 @@ from utils.training import (
 
 UMC_ABLATIONS = {
     "full": dict(use_pos=True, use_md=True, use_log_md=True, use_log_deg=True, use_deg=False),
+    "full_point_encoder": dict(use_pos=True, use_md=True, use_log_md=True, use_log_deg=True, use_deg=False),
     "no_coords": dict(use_pos=False, use_md=True, use_log_md=True, use_log_deg=True, use_deg=False),
     "md_only": dict(use_pos=False, use_md=True, use_log_md=True, use_log_deg=False, use_deg=False),
     "deg_only": dict(use_pos=False, use_md=False, use_log_md=False, use_log_deg=True, use_deg=False),
@@ -344,15 +345,26 @@ def main():
                             degree_label = "log_deg"
 
                     for lam in lambda_ortho_grid:
-                        model = UMCClassifier(
-                            K=args.K,
-                            num_classes=num_classes,
-                            use_pos=base_cfg["use_pos"],
-                            use_md=base_cfg["use_md"],
-                            use_log_md=base_cfg["use_log_md"],
-                            use_log_deg=base_cfg["use_log_deg"],
-                            use_deg=base_cfg["use_deg"],
-                        ).to(device)
+                        if cfg_name == "full_point_encoder":
+                            model = UMCPointEncoderClassifier(
+                                K=args.K,
+                                num_classes=num_classes,
+                                use_pos=base_cfg["use_pos"],
+                                use_md=base_cfg["use_md"],
+                                use_log_md=base_cfg["use_log_md"],
+                                use_log_deg=base_cfg["use_log_deg"],
+                                use_deg=base_cfg["use_deg"],
+                            ).to(device)
+                        else:
+                            model = UMCClassifier(
+                                K=args.K,
+                                num_classes=num_classes,
+                                use_pos=base_cfg["use_pos"],
+                                use_md=base_cfg["use_md"],
+                                use_log_md=base_cfg["use_log_md"],
+                                use_log_deg=base_cfg["use_log_deg"],
+                                use_deg=base_cfg["use_deg"],
+                            ).to(device)
 
                         cfg = TrainConfig(
                             epochs=args.epochs,

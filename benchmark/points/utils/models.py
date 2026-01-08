@@ -253,6 +253,29 @@ class WeightEstimator(nn.Module):
         return w.view(B * N)
 
 
+class PointEncoder(nn.Module):
+    """3-layer MLP for point encodings."""
+    def __init__(
+        self,
+        in_channels: int = 3,
+        hidden: Tuple[int, int] = (64, 128),
+        out_channels: int = 64,
+    ):
+        super().__init__()
+        h1, h2 = hidden
+        self.out_channels = int(out_channels)
+        self.mlp = nn.Sequential(
+            nn.Linear(in_channels, h1),
+            nn.ReLU(),
+            nn.Linear(h1, h2),
+            nn.ReLU(),
+            nn.Linear(h2, out_channels),
+        )
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return self.mlp(x)
+
+
 class SpectralHead(nn.Module):
     """Core spectral projection head:
       project -> filter -> abs -> flatten -> MLP -> log_softmax.
@@ -520,6 +543,63 @@ class UMCClassifier(BaseModel):
 
         B, N = get_BN(data)
         total_nodes = B * N
+
+        feat = self._weight_features(data)
+        w_pred = self.weight_net(feat, B=B, N=N)
+
+        f_hat = self.core.project(x=x, phi=phi, w=w_pred, B=B)
+        y = self.core.features_from_fhat(f_hat)
+        logp = self.core.logits_from_features(y)
+
+        aux = {"B": B, "N": N, "has_weight_net": True, "uses_weights_for_projection": True}
+        if return_features:
+            return logp, w_pred, aux, y
+        return logp, w_pred, aux
+
+
+class UMCPointEncoderClassifier(UMCClassifier):
+    """UMC with an extra point encoder; encoded points are used in projection instead of raw positions."""
+    def __init__(
+        self,
+        K: int,
+        num_classes: int,
+        point_in_channels: int = 3,
+        use_pos: bool = True,
+        use_density: bool = True,
+        use_md: Optional[bool] = None,
+        use_log_md: Optional[bool] = None,
+        use_log_deg: Optional[bool] = None,
+        use_deg: Optional[bool] = None,
+        weight_hidden: Tuple[int, int] = (128, 64),
+        point_hidden: Tuple[int, int] = (64, 128),
+        point_out_channels: int = 64,
+    ):
+        super().__init__(
+            K=K,
+            num_classes=num_classes,
+            in_channels=point_out_channels,
+            use_pos=use_pos,
+            use_density=use_density,
+            use_md=use_md,
+            use_log_md=use_log_md,
+            use_log_deg=use_log_deg,
+            use_deg=use_deg,
+            weight_hidden=weight_hidden,
+        )
+        self.point_encoder = PointEncoder(
+            in_channels=point_in_channels,
+            hidden=point_hidden,
+            out_channels=point_out_channels,
+        )
+
+    def forward(self, data: Data, return_features: bool = False):
+        x = data.pos if getattr(data, "x", None) is None else data.x
+        assert x is not None, "Either data.pos or data.x is required"
+        x = self.point_encoder(x)
+
+        phi = data.phi
+
+        B, N = get_BN(data)
 
         feat = self._weight_features(data)
         w_pred = self.weight_net(feat, B=B, N=N)
