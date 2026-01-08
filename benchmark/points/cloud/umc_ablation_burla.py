@@ -124,7 +124,7 @@ def get_data():
         dataset=["ModelNet10", "ModelNet40", "ScanObjectNN"],
         train_mode=["clean"],
         lambda_ortho_grid=["0"],
-        umc_config=["full", "no_coords", "md_only", "deg_only"],
+        umc_config=["full_point_encoder"],
         degree_features=["log"],
         seeds=list(range(10)),
         centralfile_project=["umc_ablation_burla"],
@@ -151,7 +151,7 @@ def get_data():
 
 # ----------------------------------------------------------
 
-outputs = remote_parallel_map(train_umc, get_data(), func_cpu=64, detach=True)
+outputs = remote_parallel_map(train_umc, get_data(), func_cpu=32, detach=True)
 
 rich_print(Panel.fit("[bold green]All seeds processed successfully![/bold green]"))
 rich_print(f"[bold cyan]Number of configs tested: {len(outputs)}[/bold cyan]\n")
