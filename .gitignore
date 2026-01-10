@@ -34,3 +34,4 @@ uv.lock
 
 !torch_geometric/data/
 !test/data/
+umc_protein_surface/*
