@@ -11,7 +11,7 @@ from torch_geometric.data import InMemoryDataset
 _ROOT = osp.join(osp.dirname(osp.realpath(__file__)), '..')
 _BENCH_POINTS = osp.join(_ROOT, 'points')
 if _BENCH_POINTS not in sys.path:
-    sys.path.insert(0, _BENCH_POINTS)
+    sys.path.append(_BENCH_POINTS)
 
 try:
     from utils.custom_datasets import ScanObjectNN
