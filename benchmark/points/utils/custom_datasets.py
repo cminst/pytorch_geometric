@@ -5,6 +5,7 @@ from typing import Callable, List, Optional, Union
 import h5py
 import torch
 import torch_geometric.transforms as T
+import json
 from torch import Tensor
 from torch_geometric.data import (
     Data,
