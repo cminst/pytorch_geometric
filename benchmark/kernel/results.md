@@ -1,15 +1,35 @@
-GCN: ModelNet10 (84.7%)
-GraphSAGE: ModelNet10 (82.6%)
-GIN: ModelNet10 (87.9%)
+--- ModelNet10 ---
+GCN - 84.7%
+GraphSAGE - 82.6%
+GIN - 87.9%
+Set2SetNet - 87.2%
+DiffPool - 87.7%
+Graclus - 87.1%
+TopK - 86.2%
+SAGPool - 87.7%
+LaCore - 90.4%
+ASAP - 88.4%
+EdgePool - 86.5%
 
-Set2SetNet: ModelNet10 (87.2%)
-DiffPool: ModelNet10 (87.7%)
-Graclus: ModelNet10 (87.1%)
-TopK: ModelNet10 (86.2%)
-SAGPool: ModelNet10 (87.7%)
-LaCore: ModelNet10 (90.4%)
-ASAP: ModelNet10 (88.4%)
-EdgePool: ModelNet10 (86.5%)
+--- ModelNet40 ---
+GCN: 83.44% ± 1.20% (7:06)
+Set2Set: 73.47% ± 2.64% (8:53)
+Graclus: 83.89% ± 0.80% (8:11)
+
+=== ModelNet40 | diffpool ===
+Train epochs: 100%|###############################################################################################| 300/300 [27:34<00:00,  5.52s/it]
+Val Metric: 0.7300, Test Accuracy: 0.595 ± 0.000, Duration: 1654.647
+Train epochs: 100%|###############################################################################################| 300/300 [27:34<00:00,  5.51s/it]
+Val Metric: 0.6900, Test Accuracy: 0.566 ± 0.000, Duration: 1654.140
+Train epochs: 100%|###############################################################################################| 300/300 [27:34<00:00,  5.51s/it]
+Val Metric: 0.6925, Test Accuracy: 0.595 ± 0.000, Duration: 1654.164
+Train epochs: 100%|###############################################################################################| 300/300 [27:34<00:00,  5.52s/it]
+Val Metric: 0.7150, Test Accuracy: 0.593 ± 0.000, Duration: 1654.593
+Train epochs: 100%|###############################################################################################| 300/300 [27:33<00:00,  5.51s/it]
+Val Metric: 0.6975, Test Accuracy: 0.610 ± 0.000, Duration: 1653.661
+Train epochs:  73%|##################################################5                                            | 219/300 [20:07<07:27,  5.52s/it]
+Val Metric: 0.7200, Test Accuracy: 0.591 ± 0.000, Duration: 1654.333
+
 
 **To-do list:** (out of date, ignore this)
 * Global-Attention
@@ -196,8 +216,6 @@ Produce **Table A** (GCN backbone fixed, 10 seeds, mean±std) on:
 * ScanObjectNN PB_T50_RS (or whichever single ScanObjectNN setting you choose)
 
 That’s the most concrete, high-signal addition that strengthens your paper without becoming a new project.
-
-If you tell me which ScanObjectNN split/variant you’re going to use and what node features you feed into the GNN (xyz only vs xyz+normals), I can also tell you the *smallest fair* hyperparameter grids for each baseline so the table is robust to reviewer pushback.
 
 ------
 

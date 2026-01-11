@@ -47,6 +47,8 @@ def cross_validation_with_val_set(dataset, model, folds, epochs, batch_size,
         total=len(fold_splits),
         desc="Folds",
         ascii=True,
+        ncols=40,
+        dynamic_ncols=False
     )
 
     for fold, split in enumerate(fold_iter):
@@ -211,6 +213,8 @@ def single_split_train_eval(
         total=epochs,
         desc="Train epochs",
         ascii=True,
+        ncols=40,
+        dynamic_ncols=False
     )
 
     for epoch in epoch_iter:
@@ -314,6 +318,8 @@ def train(model, optimizer, loader):
         data = data.to(device)
         out = model(data)
         loss = F.nll_loss(out, data.y.view(-1))
+        if hasattr(model, 'aux_loss') and model.aux_loss is not None:
+            loss = loss + model.aux_loss
         loss.backward()
         total_loss += loss.item() * num_graphs(data)
         optimizer.step()

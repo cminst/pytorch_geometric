@@ -228,7 +228,12 @@ def load_dataset(
 
 def build_model(method: str, dataset, args):
     if method == "diffpool":
-        return DiffPool(dataset, num_layers=2, hidden=args.hidden, ratio=args.pool_ratio)
+        return DiffPool(
+            dataset,
+            num_layers=args.diffpool_layers,
+            hidden=args.hidden,
+            ratio=args.pool_ratio,
+        )
     if method == "gcn":
         pool_name = "none"
         readout = "global"
@@ -335,6 +340,8 @@ def main():
     parser.add_argument("--lr_decay_factor", type=float, default=0.5)
     parser.add_argument("--lr_decay_step_size", type=int, default=50)
     parser.add_argument("--pool_ratio", type=float, default=0.5)
+    parser.add_argument("--diffpool_layers", type=int, default=4,
+                        help="Number of DiffPool layers (>=4 to use pooled features).")
     parser.add_argument("--val_ratio", type=float, default=0.1)
     parser.add_argument("--selection_metric", type=str, default="acc",
                         choices=["acc", "loss"])
