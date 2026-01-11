@@ -47,7 +47,7 @@ def cross_validation_with_val_set(dataset, model, folds, epochs, batch_size,
         total=len(fold_splits),
         desc="Folds",
         ascii=True,
-        ncols=40,
+        ncols=60,
         dynamic_ncols=False
     )
 
@@ -213,7 +213,7 @@ def single_split_train_eval(
         total=epochs,
         desc="Train epochs",
         ascii=True,
-        ncols=40,
+        ncols=60,
         dynamic_ncols=False
     )
 
