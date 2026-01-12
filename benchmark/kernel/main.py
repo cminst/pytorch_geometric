@@ -46,7 +46,7 @@ DEFAULT_NETS = [LaCore]
 def build_parser():
     """Create the command-line parser for benchmark configuration."""
     parser = argparse.ArgumentParser()
-    parser.add_argument('--epochs', type=int, default=500)
+    parser.add_argument('--epochs', type=int, default=300)
     parser.add_argument('--batch_size', type=int, default=128)
     parser.add_argument('--lr', type=float, default=0.01)
     parser.add_argument('--lr_decay_factor', type=float, default=0.5)
@@ -56,7 +56,7 @@ def build_parser():
                         help="Comma-separated dataset names (e.g., 'PROTEINS,ModelNet40').")
     parser.add_argument('--modelnet_num_points', type=int, default=1024,
                         help='Number of points to sample per mesh for ModelNet datasets.')
-    parser.add_argument('--modelnet_knn_k', type=int, default=16,
+    parser.add_argument('--modelnet_knn_k', type=int, default=20,
                         help='k for KNN graph construction on ModelNet datasets.')
     parser.add_argument('--modelnet_val_ratio', type=float, default=0.1,
                         help='Validation ratio taken from the ModelNet train split.')
