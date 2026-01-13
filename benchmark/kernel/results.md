@@ -19,6 +19,19 @@ DiffPool (num_layers=4): 82.91% ± 1.07% (32:32)
 TopK: 78.50% ± 4.54% (6:59)
 SAG: 79.34% ± 3.14% (7:49)
 
+--- ModelNet10 rerun ---
+GCN: 88.8%
+GIN: 88.5%
+Set2Set: 87.7%
+ASAP: 89.8%
+
+Train epochs: 100%|#######| 300/300 [16:23<00:00,  3.28s/it]
+Val Metric: 0.2840, Test Accuracy: 0.859 ± 0.000, Duration: 983.835
+Train epochs: 100%|#######| 300/300 [18:06<00:00,  3.62s/it]
+Val Metric: 0.2254, Test Accuracy: 0.861 ± 0.000, Duration: 1086.451
+Best config: {'num_layers': 5, 'hidden': 128}
+Best result - 0.861 ± 0.000
+
 **To-do list:** (out of date, ignore this)
 * Global-Attention
 * GMT
