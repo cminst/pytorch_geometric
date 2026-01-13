@@ -232,6 +232,33 @@ def _umc_corr_reg_loss(model: PointWaveletPartSeg) -> torch.Tensor:
     return torch.stack(corr_terms).mean()
 
 
+def _umc_range_reg_loss(
+    model: PointWaveletPartSeg,
+    low: float = -3.0,
+    high: float = 3.0,
+) -> torch.Tensor:
+    layers = {
+        "sa1": model.sa1.wf,
+        "sa2": model.sa2.wf,
+        "sa3": model.sa3.wf,
+        "sa4": model.sa4.wf,
+    }
+    terms: List[torch.Tensor] = []
+    for wf in layers.values():
+        umc = getattr(wf, "last_umc_raw", None)
+        if not umc:
+            continue
+        w = umc.get("w")
+        if w is None or w.numel() == 0:
+            continue
+        below = torch.relu(low - w)
+        above = torch.relu(w - high)
+        terms.append((below * below + above * above).mean())
+    if not terms:
+        return torch.zeros((), device=next(model.parameters()).device)
+    return torch.stack(terms).mean()
+
+
 def _category_onehot(category: torch.Tensor, num_categories: int) -> torch.Tensor:
     return F.one_hot(category, num_classes=num_categories).float()
 
@@ -418,6 +445,7 @@ def train_one(
     wandb_run: Optional[object] = None,
     umc_stats_batches: int = 10,
     umc_corr_reg: float = 0.0,
+    umc_range_reg: float = 0.0,
 ) -> dict:
     model = model.to(device)
 
@@ -462,7 +490,8 @@ def train_one(
                 loss_seg = F.cross_entropy(logits.view(-1, model.cfg.num_parts), y.view(-1))
                 reg_loss = model.regularization_loss()
                 corr_reg_loss = _umc_corr_reg_loss(model) if (has_umc and umc_corr_reg > 0) else 0.0
-                loss = loss_seg + reg_loss + (umc_corr_reg * corr_reg_loss)
+                range_reg_loss = _umc_range_reg_loss(model) if (has_umc and umc_range_reg > 0) else 0.0
+                loss = loss_seg + reg_loss + (umc_corr_reg * corr_reg_loss) + (umc_range_reg * range_reg_loss)
 
             scaler.scale(loss).backward()
             scaler.step(opt)
@@ -597,6 +626,12 @@ def parse_args() -> argparse.Namespace:
         default=0.0,
         help="Weight for corr(w, mean_dist) regularizer; positive encourages negative correlation. (default: 0.0)",
     )
+    p.add_argument(
+        "--umc_range_reg",
+        type=float,
+        default=1e-3,
+        help="Weight for UMC range regularizer to keep weights in [-3, 3]. (default: 1e-3)",
+    )
     p.add_argument("--save_ckpt", action="store_true", help="Save model checkpoint after training")
     p.add_argument("--ckpt_dir", type=str, default="checkpoints", help="Directory to save checkpoints (default: checkpoints)")
 
@@ -722,6 +757,7 @@ def main() -> None:
                 wandb_run=run,
                 umc_stats_batches=max(int(args.umc_stats_batches), 0),
                 umc_corr_reg=float(args.umc_corr_reg),
+                umc_range_reg=float(args.umc_range_reg),
             )
             if run is not None:
                 run.finish()
@@ -749,6 +785,7 @@ def main() -> None:
                     "umc_knn": int(args.umc_knn),
                     "umc_min_weight": float(args.umc_min_weight),
                     "umc_use_inverse": not bool(args.umc_no_inverse),
+                    "umc_range_reg": float(args.umc_range_reg),
                     "epochs": int(args.epochs),
                     "final": out["final"],
                     "best": out["best"],

@@ -25,6 +25,30 @@ GIN: 88.5%
 Set2Set: 87.7%
 ASAP: 89.8%
 
+(.venv) zli@eagle3:~/pytorch_geometric/benchmark/points$ python umc_pointwavelet_stress_eval.py --ckpt shapenet_ckpt/pointwavelet_umc_ShapeNetPart_n2048_seed0.pt --dataset_name ShapeNet --betas 0,1,2,3,4,5
+Loaded shapenet_ckpt/pointwavelet_umc_ShapeNetPart_n2048_seed0.pt (segmentation)
+ShapeNet | num_points=2048 | normals=False | normalize=False | seeds=0
+Downloading https://huggingface.co/datasets/cminst/ShapeNet/resolve/main/shapenetcore_partanno_segmentation_benchmark_v0_normal.zip
+Extracting data/ShapeNet/shapenetcore_partanno_segmentation_benchmark_v0_normal.zip
+Processing...
+Done!
+beta=0.00 | stress_OA=90.48 ± 0.00 | stress_InsIoU=78.99 ± 0.00 | stress_ClsIoU=72.07 ± 0.00 (n=1)
+beta=1.00 | stress_OA=90.08 ± 0.00 | stress_InsIoU=78.45 ± 0.00 | stress_ClsIoU=72.26 ± 0.00 (n=1)
+beta=2.00 | stress_OA=89.73 ± 0.00 | stress_InsIoU=77.84 ± 0.00 | stress_ClsIoU=71.27 ± 0.00 (n=1)
+beta=3.00 | stress_OA=89.29 ± 0.00 | stress_InsIoU=76.92 ± 0.00 | stress_ClsIoU=70.30 ± 0.00 (n=1)
+beta=4.00 | stress_OA=88.81 ± 0.00 | stress_InsIoU=76.21 ± 0.00 | stress_ClsIoU=69.79 ± 0.00 (n=1)
+beta=5.00 | stress_OA=87.89 ± 0.00 | stress_InsIoU=74.92 ± 0.00 | stress_ClsIoU=67.96 ± 0.00 (n=1)
+(.venv) zli@eagle3:~/pytorch_geometric/benchmark/points$ python umc_pointwavelet_stress_eval.py --ckpt shapenet_ckpt/pointwavelet_ShapeNetPart_n2048_seed0.pt --dataset_name ShapeNet --betas 0,1,2,3,4,5
+Loaded shapenet_ckpt/pointwavelet_ShapeNetPart_n2048_seed0.pt (segmentation)
+ShapeNet | num_points=2048 | normals=False | normalize=False | seeds=0
+beta=0.00 | stress_OA=89.50 ± 0.00 | stress_InsIoU=77.90 ± 0.00 | stress_ClsIoU=71.82 ± 0.00 (n=1)
+beta=1.00 | stress_OA=88.85 ± 0.00 | stress_InsIoU=77.03 ± 0.00 | stress_ClsIoU=70.10 ± 0.00 (n=1)
+beta=2.00 | stress_OA=88.77 ± 0.00 | stress_InsIoU=76.67 ± 0.00 | stress_ClsIoU=69.65 ± 0.00 (n=1)
+beta=3.00 | stress_OA=88.56 ± 0.00 | stress_InsIoU=76.50 ± 0.00 | stress_ClsIoU=70.08 ± 0.00 (n=1)
+beta=4.00 | stress_OA=88.30 ± 0.00 | stress_InsIoU=76.10 ± 0.00 | stress_ClsIoU=68.83 ± 0.00 (n=1)
+beta=5.00 | stress_OA=87.84 ± 0.00 | stress_InsIoU=75.30 ± 0.00 | stress_ClsIoU=67.46 ± 0.00 (n=1)
+(.venv) zli@eagle3:~/pytorch_geometric/benchmark/points$
+
 Train epochs: 100%|#######| 300/300 [16:23<00:00,  3.28s/it]
 Val Metric: 0.2840, Test Accuracy: 0.859 ± 0.000, Duration: 983.835
 Train epochs: 100%|#######| 300/300 [18:06<00:00,  3.62s/it]
