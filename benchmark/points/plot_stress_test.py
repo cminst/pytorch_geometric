@@ -133,8 +133,8 @@ for beta, pw_acc, umc_acc in zip(betas, pw_accuracies, umc_accuracies):
 
 # Add labels and title
 plt.xlabel(r"$\beta$ (Sampling Irregularity)")
-plt.ylabel("Stress Test Accuracy (%)")
-plt.title(r"Stress Test Accuracy vs $\beta$", fontweight="bold")
+plt.ylabel("ModelNet40 Stress Test Accuracy (%)")
+plt.title(r"ModelNet40 Stress Test Accuracy vs $\beta$", fontweight="bold")
 plt.grid(True, alpha=0.3, linestyle="--")
 plt.legend(loc = "lower left")
 
