@@ -17,9 +17,20 @@ import torch
 from torch.utils.flop_counter import FlopCounterMode
 from torch_geometric.data import Batch, Data
 
+try:
+    from tqdm.auto import tqdm
+except ModuleNotFoundError:  # pragma: no cover
+    tqdm = None
+
 from umc_pointwavelet import build_model as build_pointwavelet_model
 from utils.datasets import build_test_transform_clean
 from utils.models import NoWeightClassifier, UMCClassifier
+
+
+@dataclass
+class RuntimeStats:
+    mean_ms: float
+    std_ms: float
 
 
 @dataclass
@@ -32,8 +43,11 @@ class BenchmarkRow:
     forward_flops: float
     total_flops: float
     preprocess_ms: float
+    preprocess_ms_std: float
     forward_ms: float
+    forward_ms_std: float
     total_ms: float
+    total_ms_std: float
     relative_flops: float
     relative_ms: float
 
@@ -95,15 +109,54 @@ def clone_data_list(data_list: Sequence[Data]) -> List[Data]:
     return [data.clone() for data in data_list]
 
 
-def measure_runtime_ms(
+class _NullProgress:
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc, tb) -> None:
+        return None
+
+    def set_postfix_str(self, value: str) -> None:
+        return None
+
+    def update(self, value: int = 1) -> None:
+        return None
+
+
+def create_progress(total: int, desc: str):
+    if tqdm is None:
+        return _NullProgress()
+    return tqdm(total=total, desc=desc, unit="step")
+
+
+def advance_progress(progress, label: str) -> None:
+    if progress is None:
+        return
+    progress.set_postfix_str(label)
+    progress.update(1)
+
+
+def runtime_stats(values_ms: Sequence[float]) -> RuntimeStats:
+    mean_ms = sum(values_ms) / len(values_ms)
+    if len(values_ms) == 1:
+        return RuntimeStats(mean_ms=mean_ms, std_ms=0.0)
+
+    variance = sum((value - mean_ms) ** 2 for value in values_ms) / (len(values_ms) - 1)
+    return RuntimeStats(mean_ms=mean_ms, std_ms=variance ** 0.5)
+
+
+def measure_runtime_stats(
     fn: Callable[[], object],
     *,
     device: torch.device,
     warmup: int,
     repeats: int,
-) -> float:
+    progress=None,
+    label: str,
+) -> RuntimeStats:
     for _ in range(warmup):
         _ = fn()
+        advance_progress(progress, f"{label} warmup")
     synchronize(device)
 
     times_ms: List[float] = []
@@ -114,13 +167,15 @@ def measure_runtime_ms(
         synchronize(device)
         end = time.perf_counter()
         times_ms.append((end - start) * 1000.0)
+        advance_progress(progress, f"{label} timed")
 
-    return sum(times_ms) / len(times_ms)
+    return runtime_stats(times_ms)
 
 
-def measure_flops(fn: Callable[[], object]) -> float:
+def measure_flops(fn: Callable[[], object], *, progress=None, label: str) -> float:
     with FlopCounterMode(display=False) as counter:
         _ = fn()
+    advance_progress(progress, f"{label} flops")
     return float(counter.get_total_flops())
 
 
@@ -179,6 +234,11 @@ def estimate_minimal_preprocess_flops(
     return normalize_scale + pairwise_distance + knn_graph + laplacian_build + symmetric_eigh
 
 
+def total_measurement_steps(warmup: int, repeats: int) -> int:
+    per_runtime = warmup + repeats
+    return 5 + (7 * per_runtime)
+
+
 def benchmark_minimal_spectral(
     *,
     device: torch.device,
@@ -189,6 +249,7 @@ def benchmark_minimal_spectral(
     num_points: int,
     knn_k: int,
     K: int,
+    progress=None,
 ) -> List[BenchmarkRow]:
     validate_minimal_spectral_dependencies()
 
@@ -216,18 +277,24 @@ def benchmark_minimal_spectral(
         ("minimal_spectral_umc", UMCClassifier(K=K, num_classes=num_classes)),
     ]
 
-    preprocess_flops = measure_flops(preprocess_batch)
+    preprocess_flops = measure_flops(
+        preprocess_batch,
+        progress=progress,
+        label="minimal preprocess",
+    )
     if preprocess_flops <= 0.0:
         preprocess_flops = estimate_minimal_preprocess_flops(
             batch_size=batch_size,
             num_points=num_points,
             knn_k=knn_k,
         )
-    preprocess_ms = measure_runtime_ms(
+    preprocess_stats = measure_runtime_stats(
         preprocess_batch,
         device=device,
         warmup=warmup,
         repeats=repeats,
+        progress=progress,
+        label="minimal preprocess",
     )
 
     rows: List[BenchmarkRow] = []
@@ -242,16 +309,35 @@ def benchmark_minimal_spectral(
             with torch.inference_mode():
                 return model(baseline_batch)
 
-        forward_flops = measure_flops(forward_only)
-        forward_ms = measure_runtime_ms(
+        def total_pipeline() -> object:
+            batch = preprocess_batch()
+            with torch.inference_mode():
+                return model(batch)
+
+        forward_flops = measure_flops(
+            forward_only,
+            progress=progress,
+            label=model_name,
+        )
+        forward_stats = measure_runtime_stats(
             forward_only,
             device=device,
             warmup=warmup,
             repeats=repeats,
+            progress=progress,
+            label=f"{model_name} forward",
+        )
+        total_stats = measure_runtime_stats(
+            total_pipeline,
+            device=device,
+            warmup=warmup,
+            repeats=repeats,
+            progress=progress,
+            label=f"{model_name} total",
         )
 
         total_flops = preprocess_flops + forward_flops
-        total_ms = preprocess_ms + forward_ms
+        total_ms = total_stats.mean_ms
 
         if baseline_total_flops is None:
             baseline_total_flops = total_flops
@@ -266,9 +352,12 @@ def benchmark_minimal_spectral(
                 preprocess_flops=preprocess_flops,
                 forward_flops=forward_flops,
                 total_flops=total_flops,
-                preprocess_ms=preprocess_ms,
-                forward_ms=forward_ms,
+                preprocess_ms=preprocess_stats.mean_ms,
+                preprocess_ms_std=preprocess_stats.std_ms,
+                forward_ms=forward_stats.mean_ms,
+                forward_ms_std=forward_stats.std_ms,
                 total_ms=total_ms,
+                total_ms_std=total_stats.std_ms,
                 relative_flops=total_flops / baseline_total_flops,
                 relative_ms=total_ms / baseline_total_ms,
             )
@@ -298,6 +387,7 @@ def benchmark_pointwavelet(
     umc_knn: int,
     umc_min_weight: float,
     umc_use_inverse: bool,
+    progress=None,
 ) -> List[BenchmarkRow]:
     xyz = build_pointwavelet_input(
         batch_size=batch_size,
@@ -330,17 +420,23 @@ def benchmark_pointwavelet(
             with torch.inference_mode():
                 return model(xyz)
 
-        forward_flops = measure_flops(forward_only)
-        forward_ms = measure_runtime_ms(
+        forward_flops = measure_flops(
+            forward_only,
+            progress=progress,
+            label=model_name,
+        )
+        forward_stats = measure_runtime_stats(
             forward_only,
             device=device,
             warmup=warmup,
             repeats=repeats,
+            progress=progress,
+            label=f"{model_name} forward",
         )
 
         if baseline_flops is None:
             baseline_flops = forward_flops
-            baseline_ms = forward_ms
+            baseline_ms = forward_stats.mean_ms
 
         rows.append(
             BenchmarkRow(
@@ -352,10 +448,13 @@ def benchmark_pointwavelet(
                 forward_flops=forward_flops,
                 total_flops=forward_flops,
                 preprocess_ms=0.0,
-                forward_ms=forward_ms,
-                total_ms=forward_ms,
+                preprocess_ms_std=0.0,
+                forward_ms=forward_stats.mean_ms,
+                forward_ms_std=forward_stats.std_ms,
+                total_ms=forward_stats.mean_ms,
+                total_ms_std=forward_stats.std_ms,
                 relative_flops=forward_flops / baseline_flops,
-                relative_ms=forward_ms / baseline_ms,
+                relative_ms=forward_stats.mean_ms / baseline_ms,
             )
         )
 
@@ -365,33 +464,39 @@ def benchmark_pointwavelet(
 def run_all_benchmarks(args: argparse.Namespace, device: torch.device) -> List[BenchmarkRow]:
     umc_hidden = parse_int_pair(args.umc_hidden)
 
-    rows = []
-    rows.extend(
-        benchmark_minimal_spectral(
-            device=device,
-            batch_size=args.batch_size,
-            warmup=args.warmup,
-            repeats=args.repeats,
-            dense_points=args.spec_dense_points,
-            num_points=args.spec_num_points,
-            knn_k=args.spec_knn_k,
-            K=args.spec_K,
+    with create_progress(
+        total=total_measurement_steps(args.warmup, args.repeats),
+        desc=f"Benchmarking ({device})",
+    ) as progress:
+        rows = []
+        rows.extend(
+            benchmark_minimal_spectral(
+                device=device,
+                batch_size=args.batch_size,
+                warmup=args.warmup,
+                repeats=args.repeats,
+                dense_points=args.spec_dense_points,
+                num_points=args.spec_num_points,
+                knn_k=args.spec_knn_k,
+                K=args.spec_K,
+                progress=progress,
+            )
         )
-    )
-    rows.extend(
-        benchmark_pointwavelet(
-            device=device,
-            batch_size=args.batch_size,
-            warmup=args.warmup,
-            repeats=args.repeats,
-            num_points=args.pw_num_points,
-            umc_hidden=umc_hidden,
-            umc_knn=args.umc_knn,
-            umc_min_weight=args.umc_min_weight,
-            umc_use_inverse=not bool(args.umc_no_inverse),
+        rows.extend(
+            benchmark_pointwavelet(
+                device=device,
+                batch_size=args.batch_size,
+                warmup=args.warmup,
+                repeats=args.repeats,
+                num_points=args.pw_num_points,
+                umc_hidden=umc_hidden,
+                umc_knn=args.umc_knn,
+                umc_min_weight=args.umc_min_weight,
+                umc_use_inverse=not bool(args.umc_no_inverse),
+                progress=progress,
+            )
         )
-    )
-    return rows
+        return rows
 
 
 def candidate_devices(requested: str) -> List[torch.device]:
@@ -448,37 +553,57 @@ def format_params_m(value: int) -> str:
     return f"{value / 1e6:.3f}"
 
 
-def print_results(rows: Sequence[BenchmarkRow]) -> None:
+def model_display_name(model: str) -> str:
+    names = {
+        "minimal_spectral_naive": "minimal spectral",
+        "minimal_spectral_umc": "minimal spectral + UMC",
+        "pointwavelet_l": "PointWavelet-L",
+        "pointwavelet_l_umc": "PointWavelet-L + UMC",
+    }
+    return names.get(model, model)
+
+
+def format_runtime(mean_ms: float, std_ms: float) -> str:
+    return f"{mean_ms:.3f} ± {std_ms:.3f}"
+
+
+def format_ratio(value: float) -> str:
+    return f"{value:.3f}x"
+
+
+def print_results(
+    rows: Sequence[BenchmarkRow],
+    *,
+    warmup: int,
+    repeats: int,
+) -> None:
+    resolved_devices = sorted({row.resolved_device for row in rows})
+    device_label = ", ".join(resolved_devices)
+    print(f"Resolved device: {device_label}")
+    print(
+        f"Runtime (ms) is mean ± std over {repeats} timed runs after "
+        f"{warmup} warm-up runs."
+    )
+    print("Minimal spectral totals include preprocessing; PointWavelet-L totals are forward-only.\n")
+
     headers = [
-        "family",
-        "model",
-        "device",
-        "params_m",
-        "pre_gflops",
-        "fwd_gflops",
-        "total_gflops",
-        "pre_ms",
-        "fwd_ms",
-        "total_ms",
-        "rel_flops",
-        "rel_ms",
+        "Model",
+        "Params (M)",
+        "Total GFLOPs",
+        "Runtime (ms)",
+        "Rel. FLOPs",
+        "Rel. Runtime",
     ]
     table_rows = []
     for row in rows:
         table_rows.append(
             [
-                row.family,
-                row.model,
-                row.resolved_device,
+                model_display_name(row.model),
                 format_params_m(row.params),
-                format_gflops(row.preprocess_flops),
-                format_gflops(row.forward_flops),
                 format_gflops(row.total_flops),
-                f"{row.preprocess_ms:.3f}",
-                f"{row.forward_ms:.3f}",
-                f"{row.total_ms:.3f}",
-                f"{row.relative_flops:.3f}",
-                f"{row.relative_ms:.3f}",
+                format_runtime(row.total_ms, row.total_ms_std),
+                format_ratio(row.relative_flops),
+                format_ratio(row.relative_ms),
             ]
         )
 
@@ -489,11 +614,21 @@ def print_results(rows: Sequence[BenchmarkRow]) -> None:
             column_width = max(column_width, len(row[column_idx]))
         widths.append(column_width)
 
-    def render(cells: Sequence[str]) -> str:
-        return "  ".join(cell.ljust(widths[idx]) for idx, cell in enumerate(cells))
+    def render(cells: Sequence[str], separator: str = "|") -> str:
+        rendered = []
+        for idx, cell in enumerate(cells):
+            if idx == 0:
+                rendered.append(cell.ljust(widths[idx]))
+            else:
+                rendered.append(cell.rjust(widths[idx]))
+        return f"{separator} " + f" {separator} ".join(rendered) + f" {separator}"
 
     print(render(headers))
-    print(render(["-" * width for width in widths]))
+    print(
+        render(
+            ["-" * widths[0]] + ["-" * widths[idx] for idx in range(1, len(widths))]
+        )
+    )
     for row in table_rows:
         print(render(row))
 
@@ -525,7 +660,7 @@ def main() -> None:
     torch.manual_seed(0)
     rows = run_with_fallback(args)
 
-    print_results(rows)
+    print_results(rows, warmup=args.warmup, repeats=args.repeats)
     if args.csv:
         write_csv(rows, args.csv)
         print(f"\nSaved CSV to {args.csv}")
