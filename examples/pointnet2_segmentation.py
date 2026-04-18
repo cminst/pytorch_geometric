@@ -1,4 +1,5 @@
 import os.path as osp
+import sys
 
 import torch
 import torch.nn.functional as F
@@ -6,11 +7,18 @@ from pointnet2_classification import GlobalSAModule, SAModule
 from torchmetrics.functional import jaccard_index
 
 import torch_geometric.transforms as T
-from torch_geometric.datasets import ShapeNet
 from torch_geometric.loader import DataLoader
 from torch_geometric.nn import MLP, knn_interpolate
 from torch_geometric.typing import WITH_TORCH_CLUSTER
 from torch_geometric.utils import scatter
+
+_ROOT = osp.join(osp.dirname(osp.realpath(__file__)), '..')
+_BENCH_POINTS = osp.join(_ROOT, 'benchmark', 'points')
+if _BENCH_POINTS not in sys.path:
+    sys.path.insert(0, _BENCH_POINTS)
+if _ROOT not in sys.path:
+    sys.path.insert(0, _ROOT)
+from utils.custom_datasets import ShapeNetPatched as ShapeNet
 
 if not WITH_TORCH_CLUSTER:
     quit("This example requires 'torch-cluster'")

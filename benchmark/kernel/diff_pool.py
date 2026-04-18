@@ -62,11 +62,13 @@ class DiffPool(torch.nn.Module):
 
     def forward(self, data):
         x, adj, mask = data.x, data.adj, data.mask
+        self.aux_loss = 0.0
 
         s = self.pool_block1(x, adj, mask)
         x = F.relu(self.embed_block1(x, adj, mask))
         xs = [x.mean(dim=1)]
-        x, adj, _, _ = dense_diff_pool(x, adj, s, mask)
+        x, adj, link_loss, ent_loss = dense_diff_pool(x, adj, s, mask)
+        self.aux_loss = self.aux_loss + link_loss + ent_loss
 
         for i, (embed_block, pool_block) in enumerate(
                 zip(self.embed_blocks, self.pool_blocks)):
@@ -74,7 +76,8 @@ class DiffPool(torch.nn.Module):
             x = F.relu(embed_block(x, adj))
             xs.append(x.mean(dim=1))
             if i < len(self.embed_blocks) - 1:
-                x, adj, _, _ = dense_diff_pool(x, adj, s)
+                x, adj, link_loss, ent_loss = dense_diff_pool(x, adj, s)
+                self.aux_loss = self.aux_loss + link_loss + ent_loss
 
         x = self.jump(xs)
         x = F.relu(self.lin1(x))

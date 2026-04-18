@@ -1,4 +1,5 @@
 import os.path as osp
+import sys
 
 import torch
 
@@ -6,6 +7,19 @@ import torch_geometric.transforms as T
 from torch_geometric.datasets import TUDataset, ModelNet
 from torch_geometric.utils import degree
 from torch_geometric.data import InMemoryDataset
+
+_ROOT = osp.join(osp.dirname(osp.realpath(__file__)), '..')
+_BENCH_POINTS = osp.join(_ROOT, 'points')
+if _BENCH_POINTS not in sys.path:
+    sys.path.append(_BENCH_POINTS)
+
+try:
+    from utils.custom_datasets import ScanObjectNN
+    from utils.transforms import IrregularResample, TakeFirstPoints
+except Exception:  # pragma: no cover - optional dependency path
+    ScanObjectNN = None
+    IrregularResample = None
+    TakeFirstPoints = None
 
 
 class NormalizedDegree:
@@ -36,6 +50,18 @@ def get_dataset(
     dataset_config=None,
     dataset_root=None,
 ):
+    def _materialize(ds, transform):
+        data_list = [transform(ds[i]) for i in range(len(ds))]
+
+        class _Materialized(InMemoryDataset):
+            def __init__(self, dl):
+                super().__init__(root=None)
+                self.data, self.slices = self.collate(dl)
+
+        out = _Materialized(data_list)
+        out.transform = None
+        return out
+
     # ModelNet10/40 support: build point-cloud graphs the same way as
     # lacore_3d_pooling.py (SamplePoints -> NormalizeScale -> KNNGraph,
     # with x=pos).
@@ -69,23 +95,11 @@ def get_dataset(
             osp.join(dataset_root, 'ModelNet') if dataset_root else default_root,
         )
 
-        def _materialize(ds):
-            data_list = [full_transform(ds[i]) for i in range(len(ds))]
-
-            class _Materialized(InMemoryDataset):
-                def __init__(self, dl):
-                    super().__init__(root=None)
-                    self.data, self.slices = self.collate(dl)
-
-            out = _Materialized(data_list)
-            out.transform = None
-            return out
-
         if precompute:
             train_raw = ModelNet(root=root, name=num, train=True, transform=None)
             test_raw = ModelNet(root=root, name=num, train=False, transform=None)
-            train_ds = _materialize(train_raw)
-            test_ds = _materialize(test_raw)
+            train_ds = _materialize(train_raw, full_transform)
+            test_ds = _materialize(test_raw, full_transform)
         else:
             train_ds = ModelNet(root=root, name=num, train=True, transform=full_transform)
             test_ds = ModelNet(root=root, name=num, train=False, transform=full_transform)
@@ -102,6 +116,106 @@ def get_dataset(
                 self.data, self.slices = self.collate(dl)
 
         dataset = _ModelNetMerged(data_list)
+        dataset.transform = None
+        return dataset
+
+    # ScanObjectNN support: load raw point clouds then resample/normalize and
+    # build kNN graphs.
+    if name == 'ScanObjectNN':
+        if ScanObjectNN is None or IrregularResample is None or TakeFirstPoints is None:
+            raise ImportError(
+                "ScanObjectNN requires benchmark/points utils; "
+                "ensure 'benchmark/points' is available on sys.path."
+            )
+        cfg = _select_config(dataset_config, name)
+        canonical_split = cfg.get('canonical_split', True)
+        precompute = cfg.get('precompute', True)
+        variant = cfg.get('variant', 'PB_T50_RS')
+        split_dir = cfg.get('split_dir', 'main_split')
+        num_points = cfg.get('num_points', 1024)
+        knn_k = cfg.get('knn_k', 16)
+        resample_mode = cfg.get('resample', 'irregular')
+        bias_strength = cfg.get('bias_strength', 0.0)
+
+        class PosToX:
+            def __call__(self, data):
+                data.x = data.pos
+                return data
+
+        if resample_mode == 'irregular':
+            resample = IrregularResample(num_points=num_points, bias_strength=bias_strength)
+        elif resample_mode == 'take_first':
+            resample = TakeFirstPoints(num_points=num_points)
+        else:
+            raise ValueError(f"Unknown ScanObjectNN resample mode: {resample_mode}")
+
+        full_transform_steps = [
+            resample,
+            T.NormalizeScale(),
+            T.KNNGraph(k=knn_k, force_undirected=True),
+            PosToX(),
+        ]
+        if extra_transform is not None:
+            full_transform_steps.append(extra_transform)
+        if not sparse:
+            full_transform_steps.append(T.ToDense(num_points))
+        full_transform = T.Compose(full_transform_steps)
+
+        default_root = osp.join(osp.dirname(osp.realpath(__file__)), '..', 'data', 'ScanObjectNN')
+        root = cfg.get(
+            'root',
+            osp.join(dataset_root, 'ScanObjectNN') if dataset_root else default_root,
+        )
+
+        if precompute:
+            train_raw = ScanObjectNN(
+                root=root,
+                train=True,
+                variant=variant,
+                split_dir=split_dir,
+                transform=None,
+                pre_transform=None,
+            )
+            test_raw = ScanObjectNN(
+                root=root,
+                train=False,
+                variant=variant,
+                split_dir=split_dir,
+                transform=None,
+                pre_transform=None,
+            )
+            train_ds = _materialize(train_raw, full_transform)
+            test_ds = _materialize(test_raw, full_transform)
+        else:
+            train_ds = ScanObjectNN(
+                root=root,
+                train=True,
+                variant=variant,
+                split_dir=split_dir,
+                transform=full_transform,
+                pre_transform=None,
+            )
+            test_ds = ScanObjectNN(
+                root=root,
+                train=False,
+                variant=variant,
+                split_dir=split_dir,
+                transform=full_transform,
+                pre_transform=None,
+            )
+
+        if canonical_split:
+            return train_ds, test_ds
+
+        data_list = [train_ds[i] for i in range(len(train_ds))]
+        data_list += [test_ds[i] for i in range(len(test_ds))]
+
+        class _ScanMerged(InMemoryDataset):
+            def __init__(self, dl):
+                super().__init__(root=None)
+                self.data, self.slices = self.collate(dl)
+
+        dataset = _ScanMerged(data_list)
         dataset.transform = None
         return dataset
 
